@@ -14,6 +14,36 @@ except Exception as e:
     PYCAW_AVAILABLE = False
     print(f"Warning: pycaw audio initialization failed: {e}")
 
+# WINDOWS POLICY CONFIG (COM DEFAULT AUDIO ENDPOINT SWITCHER)
+try:
+    import comtypes
+    from comtypes import CLSCTX_ALL
+    CLSID_PolicyConfigClient = comtypes.GUID('{870AF99C-171D-4F9E-AF0D-E63Df40c2BC9}')
+    IID_IPolicyConfig = comtypes.GUID('{F8679F50-850A-41CF-9C72-430F290290C8}')
+
+    class IPolicyConfig(comtypes.IUnknown):
+        _iid_ = IID_IPolicyConfig
+        _methods_ = [
+            comtypes.COMMETHOD([], comtypes.HRESULT, 'GetMixFormat'),
+            comtypes.COMMETHOD([], comtypes.HRESULT, 'GetDeviceFormat'),
+            comtypes.COMMETHOD([], comtypes.HRESULT, 'ResetDeviceFormat'),
+            comtypes.COMMETHOD([], comtypes.HRESULT, 'SetDeviceFormat'),
+            comtypes.COMMETHOD([], comtypes.HRESULT, 'GetProcessingPeriod'),
+            comtypes.COMMETHOD([], comtypes.HRESULT, 'SetProcessingPeriod'),
+            comtypes.COMMETHOD([], comtypes.HRESULT, 'GetShareMode'),
+            comtypes.COMMETHOD([], comtypes.HRESULT, 'SetShareMode'),
+            comtypes.COMMETHOD([], comtypes.HRESULT, 'GetPropertyValue'),
+            comtypes.COMMETHOD([], comtypes.HRESULT, 'SetPropertyValue'),
+            comtypes.COMMETHOD([], comtypes.HRESULT, 'SetDefaultEndpoint',
+                               (['in'], ctypes.c_wchar_p, 'pwstrDeviceId'),
+                               (['in'], ctypes.c_uint, 'role')),
+            comtypes.COMMETHOD([], comtypes.HRESULT, 'SetEndpointVisibility')
+        ]
+    POLICY_CONFIG_AVAILABLE = True
+except Exception as e:
+    POLICY_CONFIG_AVAILABLE = False
+    print(f"Warning: PolicyConfig COM setup failed: {e}")
+
 # TUYA DEVICE CONTROLLER (OPTIONAL)
 try:
     import tinytuya
@@ -235,6 +265,35 @@ def adjust_app_volume(delta: int):
         logger.warning(f"No active audio session found for {target.upper()}")
         publish_popup(f"{target.upper()}: N/A")
 
+def switch_default_playback_device(target: str) -> Optional[str]:
+    """Switches Windows default audio playback endpoint between Headphones and Speakers"""
+    if not POLICY_CONFIG_AVAILABLE:
+        logger.warning("PolicyConfig COM interface is not available")
+        return None
+
+    keyword = "G321" if target == "headphones" else "EDIFIER"
+    label = "Logitech G321" if target == "headphones" else "Edifier Speakers"
+    
+    try:
+        policy = comtypes.CoCreateInstance(CLSID_PolicyConfigClient, IPolicyConfig, CLSCTX_ALL)
+        for d in AudioUtilities.GetAllDevices():
+            name = getattr(d, 'FriendlyName', '')
+            dev_id = getattr(d, 'id', '')
+            state = str(getattr(d, 'state', ''))
+            # Filter for active playback endpoints matching keyword
+            if keyword.lower() in name.lower() and 'Active' in state and dev_id.startswith('{0.0.0.'):
+                logger.info(f">>> Switching Default Audio to: {name} ({dev_id})")
+                for role in (0, 1, 2): # Console (0), Multimedia (1), Communications (2)
+                    policy.SetDefaultEndpoint(dev_id, role)
+                publish_popup(f"AUDIO:\n{label.upper()}")
+                return name
+        logger.warning(f"Audio device matching '{keyword}' not found or not active")
+        publish_popup(f"{keyword}:\nNOT ACTIVE")
+        return None
+    except Exception as e:
+        logger.error(f"Error switching audio device: {e}")
+        return None
+
 # ==============================================================================
 # MQTT HANDLERS
 # ==============================================================================
@@ -282,6 +341,12 @@ def on_message(client, userdata, msg):
         elif action == "audio_app_volume":
             delta = payload.get("delta", 0)
             adjust_app_volume(delta)
+
+        # 13 + Matrix Keys 7 & 8: Default Audio Output Switcher (Headphones vs Speakers)
+        elif action == "audio_device_select":
+            target = payload.get("target")
+            logger.info(f">>> Key 13 Audio Modifier + Key: Output Switch -> {target}")
+            switch_default_playback_device(target)
 
         # ----------------------------------------------------------------------
         # 2. KEY 5 ACTIONS: ROOM LIGHTING & PRESETS

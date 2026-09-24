@@ -156,6 +156,8 @@ bool screenNeedsUpdate = true;
 unsigned long screenUpdateScheduledTime = 0;
 String screenMessage = "BOOTING...";
 String gridLabels[9] = {"ACT 1", "ACT 2", "ACT 3", "ACT 4", "ACT 5", "ACT 6", "ACT 7", "ACT 8", "ACT 9"};
+bool isHudActive = false;
+unsigned long hudAutoDismissTime = 0;
 
 void requestScreenUpdate(bool fullRefresh = false, unsigned long delayMs = 300) {
   if (fullRefresh) fullRefreshNeeded = true;
@@ -415,10 +417,127 @@ void drawGrid() {
   }
 }
 
+void drawHud() {
+  // 1. Header Banner
+  display.fillRect(0, 0, 200, 24, GxEPD_BLACK);
+  display.setFont(&FreeSansBold9pt7b);
+  display.setTextColor(GxEPD_WHITE);
+  display.setCursor(18, 17);
+  display.print("STATUS HUD");
+
+  // 2. Telemetry items
+  display.setFont();
+  display.setTextSize(1);
+  display.setTextColor(GxEPD_BLACK);
+
+  float volts = readBatteryVoltage();
+  bool usbPwr = (volts >= USB_DETECT_THRESHOLD);
+  int battPct = 0;
+  if (volts >= 4.20f) battPct = 100;
+  else if (volts <= 3.30f) battPct = 0;
+  else battPct = (int)((volts - 3.30f) / (4.20f - 3.30f) * 100.0f);
+
+  int y = 32;
+  // Battery
+  display.setCursor(8, y);
+  display.print("POWER : ");
+  if (usbPwr) {
+    display.print("USB PWR ("); display.print(volts, 2); display.print("V)");
+  } else {
+    display.print(volts, 2); display.print("V ["); display.print(battPct); display.print("%]");
+  }
+
+  // Battery bar graph
+  y += 11;
+  display.drawRect(8, y, 184, 8, GxEPD_BLACK);
+  int fillW = usbPwr ? 180 : (int)(180.0f * (battPct / 100.0f));
+  if (fillW > 0) display.fillRect(10, y + 2, fillW, 4, GxEPD_BLACK);
+
+  // Network & RSSI
+  y += 16;
+  display.setCursor(8, y);
+  display.print("WIFI  : ");
+  if (WiFi.status() == WL_CONNECTED) {
+    display.print("CONNECTED ("); display.print(WiFi.RSSI()); display.print(" dBm)");
+  } else {
+    display.print("DISCONNECTED");
+  }
+
+  // MQTT
+  y += 13;
+  display.setCursor(8, y);
+  display.print("MQTT  : ");
+  if (mqttClient.connected()) {
+    display.print("ONLINE (192.168.1.62)");
+  } else {
+    display.print("DISCONNECTED");
+  }
+
+  // Active Profile / Bank / Layer
+  y += 13;
+  display.setCursor(8, y);
+  display.print("LAYER : Bank "); display.print(currentBank + 1);
+  display.print(" | Slot "); display.print(currentSlot + 1);
+  display.print(" (L"); display.print(currentLayer); display.print(")");
+
+  // Uptime & Heap
+  y += 13;
+  unsigned long s = millis() / 1000;
+  unsigned long m = s / 60;
+  unsigned long h = m / 60;
+  display.setCursor(8, y);
+  display.print("UPTIME: ");
+  if (h > 0) { display.print(h); display.print("h "); }
+  display.print(m % 60); display.print("m ");
+  display.print(s % 60); display.print("s");
+  display.print(" | Heap "); display.print(ESP.getFreeHeap() / 1024); display.print("KB");
+
+  // Discord Mic State
+  y += 13;
+  display.setCursor(8, y);
+  display.print("MIC   : ");
+  display.print(isMicMuted ? "[MUTED]" : "[LIVE]");
+  if (isAudioModifierHeld) display.print(" | AUD MOD");
+
+  // Quick Help
+  y += 15;
+  display.drawFastHLine(0, y, 200, GxEPD_BLACK);
+  y += 6;
+  display.setCursor(8, y);
+  display.print("AudMod+7: Logitech G321");
+  y += 11;
+  display.setCursor(8, y);
+  display.print("AudMod+8: Edifier Speakers");
+
+  // Bottom prompt
+  display.fillRect(0, 184, 200, 16, GxEPD_BLACK);
+  display.setTextColor(GxEPD_WHITE);
+  display.setCursor(20, 188);
+  display.print("[KEY 9] Exit HUD Peek");
+}
+
+void toggleHud() {
+  isHudActive = !isHudActive;
+  lastActivityTime = millis();
+  if (isHudActive) {
+    hudAutoDismissTime = millis() + 10000;
+    setKeyLED(9, strip.Color(0, 240, 255), 10000);
+    addDeviceLog("SYS", "HUD", "Opened Status HUD");
+  } else {
+    hudAutoDismissTime = 0;
+    setKeyLED(9, strip.Color(0, 0, 0), 1);
+    addDeviceLog("SYS", "HUD", "Closed Status HUD");
+  }
+  requestScreenUpdate(false, 50);
+}
+
 void updateScreen() {
   display.fillScreen(GxEPD_WHITE);
-  drawTopBar();
-  drawGrid();
+  if (isHudActive) {
+    drawHud();
+  } else {
+    drawTopBar();
+    drawGrid();
 
   if (screenMessage != "") {
     display.fillRect(10, 68, 180, 62, GxEPD_WHITE);
@@ -439,6 +558,7 @@ void updateScreen() {
       display.print(screenMessage);
     }
   }
+}
   display.display(!fullRefreshNeeded);
   fullRefreshNeeded = false;
 
@@ -919,6 +1039,9 @@ void updateLayerLEDs(bool doShow) {
       strip.setPixelColor(px, strip.Color(bc.r / 16, bc.g / 16, bc.b / 16));
     }
   }
+  if (isHudActive) {
+    strip.setPixelColor(keyToLedMap[9], strip.Color(0, 240, 255));
+  }
   if (doShow) strip.show();
 }
 
@@ -1142,6 +1265,8 @@ void loop() {
         if (!isTopRow) {
           if (keyToLedMap[5] == i && isModifierHeld) {
             strip.setPixelColor(i, strip.Color(0, 200, 255));
+          } else if (keyToLedMap[9] == i && isHudActive) {
+            strip.setPixelColor(i, strip.Color(0, 240, 255));
           } else if (keyToLedMap[13] == i) {
             if (isAudioModifierHeld) {
               strip.setPixelColor(i, strip.Color(180, 0, 255));
@@ -1383,30 +1508,47 @@ void loop() {
               else if (id == 3) selectLayerSlot(2);
               else if (id == 4) selectLayerSlot(3);
               
-              // Fixed Unassigned Keys in Left Column
+              // Fixed Key 9 in Left Column -> Full Screen Status HUD Peek
               else if (id == 9) {
-                sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"fixed_key\", \"id\":9, \"pos\":\"row2_col0\"}");
-                setKeyLED(9, strip.Color(100, 100, 100), 100);
+                toggleHud();
               }
               
               // 3x3 Dynamic Matrix Keys (Mirrors E-Ink Screen)
               else if (id != 5 && id != 13) {
-                int dynIdx = getDynamicIndex(id);
-                if (dynIdx > 0) {
-                  if (isModifierHeld) {
-                    dynKeyPressTime[dynIdx] = now;
-                    dynKeyHeld[dynIdx] = false;
-                    setKeyLED(id, strip.Color(0, 150, 255), 100); // Visual touch feedback (blue)
-                  } else {
-                    if (screenMessage != "") {
-                      screenMessage = ""; 
-                      screenMessageDismissTime = 0;
-                      requestScreenUpdate(false, 300);
+                if (isAudioModifierHeld) {
+                  if (id == 7) {
+                    sendPayload("{\"device\":\"macropad\", \"action\":\"audio_device_select\", \"target\":\"headphones\"}");
+                    addDeviceLog("INP", "AUDIO", "Output -> Logitech G321");
+                    setKeyLED(7, strip.Color(0, 240, 255), 400); // Bright cyan confirmation
+                    screenMessage = "AUDIO:\nHEADPHONES";
+                    screenMessageDismissTime = millis() + 2000;
+                    requestScreenUpdate(false, 100);
+                  } else if (id == 8) {
+                    sendPayload("{\"device\":\"macropad\", \"action\":\"audio_device_select\", \"target\":\"speakers\"}");
+                    addDeviceLog("INP", "AUDIO", "Output -> Edifier Speakers");
+                    setKeyLED(8, strip.Color(255, 180, 0), 400); // Bright amber confirmation
+                    screenMessage = "AUDIO:\nEDIFIER SPK";
+                    screenMessageDismissTime = millis() + 2000;
+                    requestScreenUpdate(false, 100);
+                  }
+                } else {
+                  int dynIdx = getDynamicIndex(id);
+                  if (dynIdx > 0) {
+                    if (isModifierHeld) {
+                      dynKeyPressTime[dynIdx] = now;
+                      dynKeyHeld[dynIdx] = false;
+                      setKeyLED(id, strip.Color(0, 150, 255), 100); // Visual touch feedback (blue)
+                    } else {
+                      if (screenMessage != "") {
+                        screenMessage = ""; 
+                        screenMessageDismissTime = 0;
+                        requestScreenUpdate(false, 300);
+                      }
+                      String lbl = gridLabels[dynIdx - 1];
+                      sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"macro\", \"index\":" + String(dynIdx) + ", \"label\":\"" + lbl + "\"}");
+                      addDeviceLog("INP", "MACRO", ("Key #" + String(dynIdx) + " (" + lbl + ")").c_str());
+                      setKeyLED(id, strip.Color(0, 255, 0), 100);
                     }
-                    String lbl = gridLabels[dynIdx - 1];
-                    sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"macro\", \"index\":" + String(dynIdx) + ", \"label\":\"" + lbl + "\"}");
-                    addDeviceLog("INP", "MACRO", ("Key #" + String(dynIdx) + " (" + lbl + ")").c_str());
-                    setKeyLED(id, strip.Color(0, 255, 0), 100);
                   }
                 }
               }
@@ -1495,6 +1637,8 @@ void loop() {
         addDeviceLog("INP", "MOD2", "Audio Modifier held active");
         int px = keyToLedMap[13];
         strip.setPixelColor(px, strip.Color(180, 0, 255)); // Purple indicates audio modifier active
+        strip.setPixelColor(keyToLedMap[7], strip.Color(0, 100, 200)); // Cyan hint: Logitech G321
+        strip.setPixelColor(keyToLedMap[8], strip.Color(200, 100, 0));  // Amber hint: Edifier Speakers
         strip.show();
       }
     } else {
@@ -1507,6 +1651,8 @@ void loop() {
           addDeviceLog("INP", "MOD2", "Audio Modifier released");
           int px = keyToLedMap[13];
           strip.setPixelColor(px, isMicMuted ? strip.Color(255, 0, 0) : strip.Color(0, 0, 0));
+          strip.setPixelColor(keyToLedMap[7], strip.Color(0, 0, 0));
+          strip.setPixelColor(keyToLedMap[8], strip.Color(0, 0, 0));
           strip.show();
         } else {
           // Short tap (< HOLD_MODIFIER_MS) -> Toggle Discord Mic Mute
@@ -1547,6 +1693,15 @@ void loop() {
     screenMessage = "";
     screenMessageDismissTime = 0;
     requestScreenUpdate(false, 50);
+  }
+
+  // Auto-dismiss Status HUD after timeout
+  if (isHudActive && hudAutoDismissTime > 0 && now >= hudAutoDismissTime) {
+    isHudActive = false;
+    hudAutoDismissTime = 0;
+    setKeyLED(9, strip.Color(0, 0, 0), 1);
+    requestScreenUpdate(false, 50);
+    addDeviceLog("SYS", "HUD", "HUD auto-dismissed");
   }
 
   // Never freeze the CPU while keys/encoders are active or within 800ms of any user action
