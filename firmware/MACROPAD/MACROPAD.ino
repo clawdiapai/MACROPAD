@@ -281,10 +281,36 @@ void IRAM_ATTR encoder1ISR() {
 // ==========================================
 // HARDWARE CONTROL 
 // ==========================================
+void recoverI2CBus() {
+  pinMode(MATRIX_SDA, INPUT_PULLUP);
+  pinMode(MATRIX_SCL, OUTPUT);
+  for (int i = 0; i < 9; i++) {
+    digitalWrite(MATRIX_SCL, HIGH);
+    delayMicroseconds(5);
+    digitalWrite(MATRIX_SCL, LOW);
+    delayMicroseconds(5);
+  }
+  pinMode(MATRIX_SDA, OUTPUT);
+  digitalWrite(MATRIX_SDA, LOW);
+  delayMicroseconds(5);
+  digitalWrite(MATRIX_SCL, HIGH);
+  delayMicroseconds(5);
+  digitalWrite(MATRIX_SDA, HIGH);
+  delayMicroseconds(5);
+  pinMode(MATRIX_SDA, INPUT_PULLUP);
+  pinMode(MATRIX_SCL, INPUT_PULLUP);
+}
+
 void setMatrixIdle() {
   Wire.beginTransmission(PCF_MATRIX);
   Wire.write(0xF0); 
-  Wire.endTransmission();
+  byte err = Wire.endTransmission();
+  if (err != 0) {
+    recoverI2CBus();
+    Wire.begin(MATRIX_SDA, MATRIX_SCL);
+    Wire.setClock(100000);
+    return;
+  }
   Wire.requestFrom(PCF_MATRIX, 1);
   if (Wire.available()) Wire.read();
 }
@@ -645,6 +671,7 @@ void goToLightSleep() {
   Wire.end();
   pinMode(MATRIX_SDA, INPUT_PULLUP);
   pinMode(MATRIX_SCL, INPUT_PULLUP);
+  recoverI2CBus();
   Wire.begin(MATRIX_SDA, MATRIX_SCL);
   Wire.setClock(100000);
   Wire.setTimeOut(20);
@@ -662,12 +689,16 @@ void goToLightSleep() {
   strip.begin();
   strip.setBrightness(100);
 
-  // 5. Restore display pin
-  pinMode(EPD_BUSY, INPUT);
+  // 5. Restore SPI bus and E-Ink display controller
+  SPI.begin(EPD_SCL, -1, EPD_SDA, EPD_CS);
+  display.init(115200, true, 2, false);
+  display.setRotation(2);
+  display.setTextColor(GxEPD_BLACK);
 
-  // 6. Restore Wi-Fi
+  // 6. Restore Wi-Fi with brownout-safe TX power
   WiFi.mode(WIFI_STA);
-  WiFi.setSleep(false); // High-performance Wi-Fi while awake (zero DTIM latency spikes)
+  WiFi.setSleep(false);
+  WiFi.setTxPower(WIFI_POWER_15dBm);
   WiFi.begin(ssid, password);
   
   // 7. Instant energetic wake animation and restore active layer LED
@@ -929,6 +960,7 @@ void setupWebServer() {
 void setupNetwork() {
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false); // High-performance Wi-Fi while awake (zero DTIM latency spikes)
+  WiFi.setTxPower(WIFI_POWER_15dBm); // Prevents battery voltage brownouts on peak RF bursts
   WiFi.begin(ssid, password);
   mqttClient.setServer(mqtt_server, 1883);
   mqttClient.setSocketTimeout(1); // 1-second timeout (prevents 15s connection hangs)
@@ -1203,6 +1235,7 @@ void setup() {
 
   pinMode(MATRIX_SDA, INPUT_PULLUP);
   pinMode(MATRIX_SCL, INPUT_PULLUP);
+  recoverI2CBus();
   Wire.begin(MATRIX_SDA, MATRIX_SCL);
   Wire.setClock(100000); 
   Wire.setTimeOut(20); 
@@ -1705,7 +1738,7 @@ void loop() {
   }
 
   // Never freeze the CPU while keys/encoders are active or within 800ms of any user action
-  if (screenNeedsUpdate && (now >= screenUpdateScheduledTime) && (now - lastActivityTime >= 800) && digitalRead(EPD_BUSY) == LOW && !isPollingMatrix) {
+  if (screenNeedsUpdate && (now >= screenUpdateScheduledTime) && (now - lastActivityTime >= 800)) {
     updateScreen();
     screenNeedsUpdate = false;
   }
