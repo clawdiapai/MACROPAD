@@ -1,0 +1,27 @@
+# Build and temporary artifacts
+build/
+*.bin
+*.elf
+*.o
+*.d
+*.libsdetect.d
+*.merged
+
+# Arduino / IDE directories
+.arduino/
+.vscode/
+.idea/
+
+# Python cache & virtual environments
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+
+# Logs & environment
+*.log
+.env

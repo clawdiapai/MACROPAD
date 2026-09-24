@@ -1,0 +1,14 @@
+[Unit]
+Description=MacroPad Web Dashboard and MQTT Diagnostic Server
+After=network.target mosquitto.service
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/MACROPAD/pi_app
+ExecStart=/usr/bin/python3 /home/pi/MACROPAD/pi_app/app.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

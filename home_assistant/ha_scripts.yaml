@@ -1,0 +1,145 @@
+ceiling_stop_animations:
+  alias: "Ceiling - Stop Animations"
+  sequence:
+    - action: script.turn_off
+      target:
+        entity_id:
+          - script.ceiling_anim_rainbow
+          - script.ceiling_anim_chill
+          - script.ceiling_anim_disco
+          - script.ceiling_anim_breathing
+          - script.ceiling_anim_warm_cool
+  mode: single
+
+ceiling_anim_rainbow:
+  alias: "Ceiling - Rainbow Spin"
+  mode: restart
+  sequence:
+    - repeat:
+        while:
+          - condition: template
+            value_template: "{{ is_state('input_select.ceiling_animation', 'Rainbow Spin') and is_state('light.inteligent_ceiling_light', 'on') }}"
+        sequence:
+          - action: input_number.set_value
+            target:
+              entity_id: input_number.ceiling_hue
+            data:
+              value: "{{ ((states('input_number.ceiling_hue') | float(0) + 25) % 360) | round(0) }}"
+          - action: light.turn_on
+            target:
+              entity_id: light.inteligent_ceiling_light
+            data:
+              hs_color:
+                - "{{ states('input_number.ceiling_hue') | int }}"
+                - 100
+          - delay:
+              milliseconds: "{{ [ 250, (250 + (100 - states('input_number.ceiling_animation_speed') | float(50)) * 35) | int ] | max }}"
+
+ceiling_anim_chill:
+  alias: "Ceiling - Color Chill"
+  mode: restart
+  sequence:
+    - repeat:
+        while:
+          - condition: template
+            value_template: "{{ is_state('input_select.ceiling_animation', 'Color Chill') and is_state('light.inteligent_ceiling_light', 'on') }}"
+        sequence:
+          - action: input_number.set_value
+            target:
+              entity_id: input_number.ceiling_hue
+            data:
+              value: "{{ ((states('input_number.ceiling_hue') | float(0) + 55) % 360) | round(0) }}"
+          - action: light.turn_on
+            target:
+              entity_id: light.inteligent_ceiling_light
+            data:
+              hs_color:
+                - "{{ states('input_number.ceiling_hue') | int }}"
+                - 80
+          - delay:
+              milliseconds: "{{ [ 500, (600 + (100 - states('input_number.ceiling_animation_speed') | float(50)) * 60) | int ] | max }}"
+
+ceiling_anim_disco:
+  alias: "Ceiling - Party Disco"
+  mode: restart
+  sequence:
+    - repeat:
+        while:
+          - condition: template
+            value_template: "{{ is_state('input_select.ceiling_animation', 'Party Disco') and is_state('light.inteligent_ceiling_light', 'on') }}"
+        sequence:
+          - action: input_number.set_value
+            target:
+              entity_id: input_number.ceiling_hue
+            data:
+              value: "{{ ((states('input_number.ceiling_hue') | float(0) + 120) % 360) | round(0) }}"
+          - action: light.turn_on
+            target:
+              entity_id: light.inteligent_ceiling_light
+            data:
+              hs_color:
+                - "{{ states('input_number.ceiling_hue') | int }}"
+                - 100
+              brightness_pct: 100
+          - delay:
+              milliseconds: "{{ [ 250, (250 + (100 - states('input_number.ceiling_animation_speed') | float(50)) * 25) | int ] | max }}"
+
+ceiling_anim_breathing:
+  alias: "Ceiling - Breathing"
+  mode: restart
+  sequence:
+    - repeat:
+        while:
+          - condition: template
+            value_template: "{{ is_state('input_select.ceiling_animation', 'Breathing') and is_state('light.inteligent_ceiling_light', 'on') }}"
+        sequence:
+          - repeat:
+              count: 6
+              sequence:
+                - action: light.turn_on
+                  target:
+                    entity_id: light.inteligent_ceiling_light
+                  data:
+                    brightness_pct: "{{ [15, 30, 50, 75, 90, 100][repeat.index - 1] }}"
+                - delay:
+                    milliseconds: "{{ [ 200, (200 + (100 - states('input_number.ceiling_animation_speed') | float(50)) * 20) | int ] | max }}"
+          - repeat:
+              count: 5
+              sequence:
+                - action: light.turn_on
+                  target:
+                    entity_id: light.inteligent_ceiling_light
+                  data:
+                    brightness_pct: "{{ [85, 65, 45, 25, 15][repeat.index - 1] }}"
+                - delay:
+                    milliseconds: "{{ [ 200, (200 + (100 - states('input_number.ceiling_animation_speed') | float(50)) * 20) | int ] | max }}"
+
+ceiling_anim_warm_cool:
+  alias: "Ceiling - Warm-Cool Wave"
+  mode: restart
+  sequence:
+    - repeat:
+        while:
+          - condition: template
+            value_template: "{{ is_state('input_select.ceiling_animation', 'Warm-Cool Wave') and is_state('light.inteligent_ceiling_light', 'on') }}"
+        sequence:
+          - repeat:
+              count: 5
+              sequence:
+                - action: light.turn_on
+                  target:
+                    entity_id: light.inteligent_ceiling_light
+                  data:
+                    color_temp_kelvin: "{{ [2200, 3200, 4200, 5300, 6500][repeat.index - 1] }}"
+                - delay:
+                    milliseconds: "{{ [ 300, (350 + (100 - states('input_number.ceiling_animation_speed') | float(50)) * 35) | int ] | max }}"
+          - repeat:
+              count: 4
+              sequence:
+                - action: light.turn_on
+                  target:
+                    entity_id: light.inteligent_ceiling_light
+                  data:
+                    color_temp_kelvin: "{{ [5500, 4500, 3500, 2500][repeat.index - 1] }}"
+                - delay:
+                    milliseconds: "{{ [ 300, (350 + (100 - states('input_number.ceiling_animation_speed') | float(50)) * 35) | int ] | max }}"

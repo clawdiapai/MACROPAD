@@ -1,0 +1,473 @@
+- id: "macropad_light_toggle"
+  alias: "MacroPad - Toggle Ceiling Light"
+  description: "Toggles Inteligent Ceiling Light when Key 5 is tapped on MacroPad"
+  trigger:
+    - platform: mqtt
+      topic: macropad/input
+  condition:
+    - condition: template
+      value_template: "{{ trigger.payload_json is defined and trigger.payload_json.action == 'light_toggle' }}"
+  action:
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: "{{ is_state('light.inteligent_ceiling_light', 'on') }}"
+          sequence:
+            - action: input_select.select_option
+              target:
+                entity_id: input_select.ceiling_animation
+              data:
+                option: "Static"
+            - action: script.ceiling_stop_animations
+            - action: light.turn_off
+              target:
+                entity_id: light.inteligent_ceiling_light
+      default:
+        - action: light.turn_on
+          target:
+            entity_id: light.inteligent_ceiling_light
+  mode: single
+
+- id: "sync_ceiling_brightness"
+  alias: "Sync Ceiling Brightness"
+  description: "Keep input_number in sync with external light changes"
+  trigger:
+    - platform: state
+      entity_id: light.inteligent_ceiling_light
+  condition:
+    - condition: template
+      value_template: >
+        {{ is_state('light.inteligent_ceiling_light', 'on') and
+           state_attr('light.inteligent_ceiling_light', 'brightness') is not none }}
+  action:
+    - action: input_number.set_value
+      target:
+        entity_id: input_number.ceiling_brightness
+      data:
+        value: >
+          {% set raw_b = state_attr('light.inteligent_ceiling_light', 'brightness') | float(128) %}
+          {% set act_pct = (raw_b / 255.0 * 100.0) %}
+          {% set min_glow = 5 %}
+          {% if act_pct <= min_glow %}
+            1
+          {% else %}
+            {{ (1 + (act_pct - min_glow) * 99 / (100 - min_glow)) | round(0) | int }}
+          {% endif %}
+  mode: restart
+
+- id: "macropad_enc1_click_toggle_mode"
+  alias: "MacroPad - Toggle Encoder 1 Brightness/Temp Mode"
+  description: "Toggles between brightness and temperature control when Encoder 1 is clicked with modifier"
+  trigger:
+    - platform: mqtt
+      topic: macropad/input
+  condition:
+    - condition: template
+      value_template: >
+        {{ trigger.payload_json is defined and
+           trigger.payload_json.action == 'encoder_click' and 
+           trigger.payload_json.id == 1 and 
+           trigger.payload_json.modifier == true }}
+  action:
+    - action: input_select.select_next
+      target:
+        entity_id: input_select.ceiling_enc1_mode
+    - action: mqtt.publish
+      data:
+        topic: macropad/display
+        payload: >
+          {"popup": "MODE:\n{{ states('input_select.ceiling_enc1_mode') | title }}"}
+  mode: single
+
+- id: "macropad_dimmer_encoder_1"
+  alias: "MacroPad - Encoder 1 Scroll (Brightness / Temperature)"
+  description: "Adjusts brightness or color temperature depending on active mode"
+  trigger:
+    - platform: mqtt
+      topic: macropad/input
+  condition:
+    - condition: template
+      value_template: >
+        {{ trigger.payload_json is defined and
+           trigger.payload_json.action == 'encoder_scroll' and 
+           trigger.payload_json.id == 1 and 
+           trigger.payload_json.modifier == true }}
+  action:
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: "{{ not is_state('input_select.ceiling_animation', 'Static') }}"
+          sequence:
+            - action: input_select.select_option
+              target:
+                entity_id: input_select.ceiling_animation
+              data:
+                option: "Static"
+            - action: script.ceiling_stop_animations
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: "{{ states('input_select.ceiling_enc1_mode') == 'temperature' }}"
+          sequence:
+            - action: input_number.set_value
+              target:
+                entity_id: input_number.ceiling_colortemp
+              data:
+                value: >
+                  {% set cur = states('input_number.ceiling_colortemp') | float(4000) %}
+                  {% set delta = trigger.payload_json.delta | float(0) %}
+                  {% set target = cur + (delta * 150) %}
+                  {{ [ 2000, [ 6500, target ] | min ] | max | round(0) }}
+            - delay:
+                milliseconds: 120
+            - action: light.turn_on
+              target:
+                entity_id: light.inteligent_ceiling_light
+              data:
+                color_temp_kelvin: "{{ states('input_number.ceiling_colortemp') | int }}"
+            - action: mqtt.publish
+              data:
+                topic: macropad/display
+                payload: >
+                  {"popup": "TEMP:\n{{ states('input_number.ceiling_colortemp') | int }}K"}
+      default:
+        - action: input_number.set_value
+          target:
+            entity_id: input_number.ceiling_brightness
+          data:
+            value: >
+              {% set cur = states('input_number.ceiling_brightness') | float(50) %}
+              {% set delta = trigger.payload_json.delta | float(0) %}
+              {% set target = cur + (delta * 2) %}
+              {{ [ 1, [ 100, target ] | min ] | max | round(0) }}
+        - delay:
+            milliseconds: 120
+        - action: light.turn_on
+          target:
+            entity_id: light.inteligent_ceiling_light
+          data:
+            brightness_pct: >
+              {% set u = states('input_number.ceiling_brightness') | float(50) %}
+              {% set min_glow = 5 %}
+              {{ (min_glow + (u - 1) * (100 - min_glow) / 99) | round(0) | int }}
+        - action: mqtt.publish
+          data:
+            topic: macropad/display
+            payload: >
+              {"popup": "BRIGHT:\n{{ states('input_number.ceiling_brightness') | int }}%"}
+  mode: restart
+
+- id: "macropad_encoder_2_color"
+  alias: "MacroPad - Encoder 2 Color Wheel"
+  description: "Adjusts light RGB color (hue) when Encoder 2 is turned with modifier"
+  trigger:
+    - platform: mqtt
+      topic: macropad/input
+  condition:
+    - condition: template
+      value_template: >
+        {{ trigger.payload_json is defined and
+           trigger.payload_json.action == 'encoder_scroll' and 
+           trigger.payload_json.id == 2 and 
+           trigger.payload_json.modifier == true }}
+  action:
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: "{{ not is_state('input_select.ceiling_animation', 'Static') }}"
+          sequence:
+            - action: input_select.select_option
+              target:
+                entity_id: input_select.ceiling_animation
+              data:
+                option: "Static"
+            - action: script.ceiling_stop_animations
+    - action: input_number.set_value
+      target:
+        entity_id: input_number.ceiling_hue
+      data:
+        value: >
+          {% set cur = states('input_number.ceiling_hue') | float(0) %}
+          {% set delta = trigger.payload_json.delta | float(0) %}
+          {% set new_h = (cur + (delta * 12)) % 360 %}
+          {{ ((new_h + 360) % 360) | round(0) }}
+    - delay:
+        milliseconds: 120
+    - action: light.turn_on
+      target:
+        entity_id: light.inteligent_ceiling_light
+      data:
+        hs_color:
+          - "{{ states('input_number.ceiling_hue') | int }}"
+          - 100
+    - action: mqtt.publish
+      data:
+        topic: macropad/display
+        payload: >
+          {"popup": "COLOR:\nHue {{ states('input_number.ceiling_hue') | int }} deg"}
+  mode: restart
+
+- id: "macropad_enc2_click_reset_white"
+  alias: "MacroPad - Reset Light to White"
+  description: "Resets ceiling light back to white when Encoder 2 (color) is clicked with modifier"
+  trigger:
+    - platform: mqtt
+      topic: macropad/input
+  condition:
+    - condition: template
+      value_template: >
+        {{ trigger.payload_json is defined and
+           trigger.payload_json.action == 'encoder_click' and 
+           trigger.payload_json.id == 2 and 
+           trigger.payload_json.modifier == true }}
+  action:
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: "{{ not is_state('input_select.ceiling_animation', 'Static') }}"
+          sequence:
+            - action: input_select.select_option
+              target:
+                entity_id: input_select.ceiling_animation
+              data:
+                option: "Static"
+            - action: script.ceiling_stop_animations
+    - action: light.turn_on
+      target:
+        entity_id: light.inteligent_ceiling_light
+      data:
+        color_temp_kelvin: "{{ states('input_number.ceiling_colortemp') | int(4000) }}"
+    - action: mqtt.publish
+      data:
+        topic: macropad/display
+        payload: >
+          {"popup": "COLOR:\nWhite Mode"}
+  mode: restart
+
+- id: "macropad_enc3_click_toggle_mode"
+  alias: "MacroPad - Toggle Encoder 3 Selection/Speed Mode"
+  description: "Toggles between animation selection and speed when Encoder 3 is clicked with modifier"
+  trigger:
+    - platform: mqtt
+      topic: macropad/input
+  condition:
+    - condition: template
+      value_template: >
+        {{ trigger.payload_json is defined and
+           trigger.payload_json.action == 'encoder_click' and 
+           trigger.payload_json.id == 3 and 
+           trigger.payload_json.modifier == true }}
+  action:
+    - action: input_select.select_next
+      target:
+        entity_id: input_select.ceiling_enc3_mode
+    - action: mqtt.publish
+      data:
+        topic: macropad/display
+        payload: >
+          {"popup": "ENC3:\n{{ states('input_select.ceiling_enc3_mode') | title }}"}
+  mode: single
+
+- id: "macropad_encoder_3_scroll"
+  alias: "MacroPad - Encoder 3 Animations and Speed"
+  description: "Cycles animations or adjusts speed depending on Encoder 3 mode"
+  trigger:
+    - platform: mqtt
+      topic: macropad/input
+  condition:
+    - condition: template
+      value_template: >
+        {{ trigger.payload_json is defined and
+           trigger.payload_json.action == 'encoder_scroll' and 
+           trigger.payload_json.id == 3 and 
+           trigger.payload_json.modifier == true }}
+  action:
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: "{{ states('input_select.ceiling_enc3_mode') == 'speed' }}"
+          sequence:
+            - action: input_number.set_value
+              target:
+                entity_id: input_number.ceiling_animation_speed
+              data:
+                value: >
+                  {% set cur = states('input_number.ceiling_animation_speed') | float(50) %}
+                  {% set delta = trigger.payload_json.delta | float(0) %}
+                  {% set target = cur + (delta * 5) %}
+                  {{ [ 1, [ 100, target ] | min ] | max | round(0) }}
+            - action: mqtt.publish
+              data:
+                topic: macropad/display
+                payload: >
+                  {"popup": "SPEED:\n{{ states('input_number.ceiling_animation_speed') | int }}%"}
+        - conditions:
+            - condition: template
+              value_template: "{{ states('input_select.ceiling_enc3_mode') == 'selection' }}"
+          sequence:
+            - choose:
+                - conditions:
+                    - condition: template
+                      value_template: "{{ trigger.payload_json.delta > 0 }}"
+                  sequence:
+                    - action: input_select.select_next
+                      target:
+                        entity_id: input_select.ceiling_animation
+              default:
+                - action: input_select.select_previous
+                  target:
+                    entity_id: input_select.ceiling_animation
+            - action: mqtt.publish
+              data:
+                topic: macropad/display
+                payload: >
+                  {"popup": "ANIM:\n{{ states('input_select.ceiling_animation') }}"}
+  mode: restart
+
+- id: "ceiling_animation_runner"
+  alias: "Ceiling - Animation Runner"
+  description: "Starts/stops lighting animation scripts when animation mode changes"
+  trigger:
+    - platform: state
+      entity_id: input_select.ceiling_animation
+  action:
+    - action: script.ceiling_stop_animations
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: "{{ trigger.to_state.state == 'Rainbow Spin' }}"
+          sequence:
+            - action: script.ceiling_anim_rainbow
+        - conditions:
+            - condition: template
+              value_template: "{{ trigger.to_state.state == 'Color Chill' }}"
+          sequence:
+            - action: script.ceiling_anim_chill
+        - conditions:
+            - condition: template
+              value_template: "{{ trigger.to_state.state == 'Party Disco' }}"
+          sequence:
+            - action: script.ceiling_anim_disco
+        - conditions:
+            - condition: template
+              value_template: "{{ trigger.to_state.state == 'Breathing' }}"
+          sequence:
+            - action: script.ceiling_anim_breathing
+        - conditions:
+            - condition: template
+              value_template: "{{ trigger.to_state.state == 'Warm-Cool Wave' }}"
+          sequence:
+            - action: script.ceiling_anim_warm_cool
+  mode: restart
+
+- id: "macropad_preset_save"
+  alias: "MacroPad - Save Preset"
+  description: "Saves current light state to preset when modifier + long press on matrix key"
+  trigger:
+    - platform: mqtt
+      topic: macropad/input
+  condition:
+    - condition: template
+      value_template: >
+        {{ trigger.payload_json is defined and
+           trigger.payload_json.action == 'preset_save' and 
+           trigger.payload_json.index is defined }}
+  action:
+    - action: input_text.set_value
+      target:
+        entity_id: "input_text.ceiling_preset_{{ trigger.payload_json.index }}"
+      data:
+        value: >
+          {% set lm = state_attr('light.inteligent_ceiling_light', 'color_mode') %}
+          {% set bri = state_attr('light.inteligent_ceiling_light', 'brightness') | default(128, true) %}
+          {% if lm == 'hs' %}
+            {% set hs = state_attr('light.inteligent_ceiling_light', 'hs_color') | default([0, 100], true) %}
+            {"mode":"hs","hue":{{ hs[0] | round(0) }},"sat":{{ hs[1] | round(0) }},"bri":{{ bri }}}
+          {% else %}
+            {% set ct = state_attr('light.inteligent_ceiling_light', 'color_temp_kelvin') | default(4000, true) %}
+            {"mode":"temp","temp":{{ ct }},"bri":{{ bri }}}
+          {% endif %}
+    - action: mqtt.publish
+      data:
+        topic: macropad/display
+        payload: >
+          {"popup": "PRESET {{ trigger.payload_json.index }}\nSAVED!"}
+  mode: single
+
+- id: "macropad_preset_recall"
+  alias: "MacroPad - Recall Preset"
+  description: "Recalls preset when modifier + tap on matrix key"
+  trigger:
+    - platform: mqtt
+      topic: macropad/input
+  condition:
+    - condition: template
+      value_template: >
+        {{ trigger.payload_json is defined and
+           trigger.payload_json.action == 'preset_recall' and 
+           trigger.payload_json.index is defined }}
+  action:
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: "{{ not is_state('input_select.ceiling_animation', 'Static') }}"
+          sequence:
+            - action: input_select.select_option
+              target:
+                entity_id: input_select.ceiling_animation
+              data:
+                option: "Static"
+            - action: script.ceiling_stop_animations
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: >
+                {% set entity = 'input_text.ceiling_preset_' ~ trigger.payload_json.index %}
+                {{ states(entity) != '' and states(entity) != 'unknown' and states(entity) != 'unavailable' }}
+          sequence:
+            - variables:
+                preset: >
+                  {% set entity = 'input_text.ceiling_preset_' ~ trigger.payload_json.index %}
+                  {{ states(entity) | from_json }}
+            - choose:
+                - conditions:
+                    - condition: template
+                      value_template: "{{ preset.mode == 'hs' }}"
+                  sequence:
+                    - action: light.turn_on
+                      target:
+                        entity_id: light.inteligent_ceiling_light
+                      data:
+                        brightness: "{{ preset.bri }}"
+                        hs_color:
+                          - "{{ preset.hue }}"
+                          - "{{ preset.sat }}"
+                    - action: input_number.set_value
+                      target:
+                        entity_id: input_number.ceiling_hue
+                      data:
+                        value: "{{ preset.hue }}"
+              default:
+                - action: light.turn_on
+                  target:
+                    entity_id: light.inteligent_ceiling_light
+                  data:
+                    brightness: "{{ preset.bri }}"
+                    color_temp_kelvin: "{{ preset.temp }}"
+                - action: input_number.set_value
+                  target:
+                    entity_id: input_number.ceiling_colortemp
+                  data:
+                    value: "{{ preset.temp }}"
+            - action: mqtt.publish
+              data:
+                topic: macropad/display
+                payload: >
+                  {"popup": "PRESET {{ trigger.payload_json.index }}\nACTIVATED"}
+      default:
+        - action: mqtt.publish
+          data:
+            topic: macropad/display
+            payload: >
+              {"popup": "PRESET {{ trigger.payload_json.index }}\nEMPTY"}
+  mode: restart

@@ -1,0 +1,111 @@
+# Loads default set of integrations. Do not remove.
+default_config:
+
+# Load frontend themes from the themes folder
+frontend:
+  themes: !include_dir_merge_named themes
+
+automation: !include automations.yaml
+script: !include scripts.yaml
+scene: !include scenes.yaml
+
+input_number:
+  ceiling_brightness:
+    name: "Ceiling Brightness Target"
+    min: 1
+    max: 100
+    step: 1
+    initial: 50
+
+  ceiling_colortemp:
+    name: "Ceiling Color Temp Target"
+    min: 2000
+    max: 6500
+    step: 50
+    initial: 4000
+
+  ceiling_hue:
+    name: "Ceiling Hue Target"
+    min: 0
+    max: 360
+    step: 5
+    initial: 0
+
+  ceiling_animation_speed:
+    name: "Ceiling Animation Speed"
+    min: 1
+    max: 100
+    step: 1
+    initial: 50
+
+input_select:
+  ceiling_enc1_mode:
+    name: "Encoder 1 Light Mode"
+    options:
+      - "brightness"
+      - "temperature"
+    initial: "brightness"
+
+  ceiling_enc3_mode:
+    name: "Encoder 3 Mode"
+    options:
+      - "selection"
+      - "speed"
+    initial: "selection"
+
+  ceiling_animation:
+    name: "Ceiling Animation Mode"
+    options:
+      - "Static"
+      - "Rainbow Spin"
+      - "Color Chill"
+      - "Party Disco"
+      - "Breathing"
+      - "Warm-Cool Wave"
+    initial: "Static"
+
+input_text:
+  ceiling_preset_1:
+    name: "Ceiling Preset 1"
+    initial: '{"mode":"temp","temp":2200,"bri":102}'
+    max: 255
+
+  ceiling_preset_2:
+    name: "Ceiling Preset 2"
+    initial: '{"mode":"temp","temp":3000,"bri":178}'
+    max: 255
+
+  ceiling_preset_3:
+    name: "Ceiling Preset 3"
+    initial: '{"mode":"temp","temp":5000,"bri":255}'
+    max: 255
+
+  ceiling_preset_4:
+    name: "Ceiling Preset 4"
+    initial: '{"mode":"temp","temp":2200,"bri":13}'
+    max: 255
+
+  ceiling_preset_5:
+    name: "Ceiling Preset 5"
+    initial: '{"mode":"hs","hue":35,"sat":100,"bri":204}'
+    max: 255
+
+  ceiling_preset_6:
+    name: "Ceiling Preset 6"
+    initial: '{"mode":"hs","hue":185,"sat":100,"bri":204}'
+    max: 255
+
+  ceiling_preset_7:
+    name: "Ceiling Preset 7"
+    initial: '{"mode":"hs","hue":230,"sat":100,"bri":204}'
+    max: 255
+
+  ceiling_preset_8:
+    name: "Ceiling Preset 8"
+    initial: '{"mode":"hs","hue":285,"sat":100,"bri":217}'
+    max: 255
+
+  ceiling_preset_9:
+    name: "Ceiling Preset 9"
+    initial: '{"mode":"hs","hue":330,"sat":100,"bri":217}'
+    max: 255
