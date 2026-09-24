@@ -107,6 +107,55 @@ unsigned long lastActivityTime = 0;
 const unsigned long SLEEP_TIMEOUT = 600000; // 10 minutes idle -> sleep (prevents constant sleep while working)
 const float LOW_BATTERY_THRESHOLD = 3.3;
 const float USB_DETECT_THRESHOLD = 4.3;
+const int BATTERY_CAPACITY_MAH = 4000;
+const int CHARGE_CURRENT_MA = 1000;
+
+struct LipoPoint {
+  float v;
+  int pct;
+};
+
+// Open-Circuit / Resting LiPo Voltage to State of Charge (SoC) lookup table
+const LipoPoint lipoOcvTable[] = {
+  {4.20f, 100},
+  {4.13f, 90},
+  {4.03f, 80},
+  {3.93f, 70},
+  {3.85f, 60},
+  {3.80f, 50},
+  {3.76f, 40},
+  {3.72f, 30},
+  {3.67f, 20},
+  {3.58f, 10},
+  {3.45f, 5},
+  {3.30f, 0}
+};
+const int LIPO_TABLE_ENTRIES = sizeof(lipoOcvTable) / sizeof(lipoOcvTable[0]);
+
+int getLipoPercentage(float volts) {
+  if (volts >= lipoOcvTable[0].v) return 100;
+  if (volts <= lipoOcvTable[LIPO_TABLE_ENTRIES - 1].v) return 0;
+  for (int i = 0; i < LIPO_TABLE_ENTRIES - 1; i++) {
+    if (volts <= lipoOcvTable[i].v && volts >= lipoOcvTable[i + 1].v) {
+      float vHigh = lipoOcvTable[i].v;
+      float vLow = lipoOcvTable[i + 1].v;
+      int pHigh = lipoOcvTable[i].pct;
+      int pLow = lipoOcvTable[i + 1].pct;
+      float fraction = (volts - vLow) / (vHigh - vLow);
+      return pLow + (int)(fraction * (pHigh - pLow));
+    }
+  }
+  return 0;
+}
+
+int calculateTimeToFull(int pct) {
+  if (pct >= 99) return 5;
+  float remMah = (float)BATTERY_CAPACITY_MAH * (1.0f - ((float)pct / 100.0f));
+  float hours = remMah / (float)CHARGE_CURRENT_MA;
+  if (pct < 80) hours += 0.4f; // Add ~24 mins for CV phase taper
+  else hours *= 1.3f;
+  return max(1, (int)(hours * 60.0f));
+}
 
 RTC_DATA_ATTR int rtcBank = 0;
 RTC_DATA_ATTR int rtcSlot = 0;
@@ -391,6 +440,10 @@ void drawTopBar() {
   display.setTextColor(GxEPD_BLACK);
   
   float volts = readBatteryVoltage();
+  bool usbPwr = (volts >= USB_DETECT_THRESHOLD);
+  bool isCharging = (!usbPwr && volts >= 4.00f);
+  float effVolts = isCharging ? max(3.30f, volts - 0.24f) : volts;
+  int battPct = getLipoPercentage(effVolts);
   bool wifiOk = (WiFi.status() == WL_CONNECTED);
   bool mqttOk = mqttClient.connected();
 
@@ -399,8 +452,9 @@ void drawTopBar() {
   display.setCursor(75, 5);
   display.print(mqttOk ? "M:OK" : "M:--");
   
-  display.setCursor(140, 5);
-  if (volts >= USB_DETECT_THRESHOLD) display.print("USB PWR");
+  display.setCursor(130, 5);
+  if (usbPwr) display.print("USB PWR");
+  else if (isCharging) display.print("CHG " + String(battPct) + "%");
   else display.print("BAT:" + String(volts, 2) + "V");
   
   display.drawLine(0, 16, 200, 16, GxEPD_BLACK);
@@ -450,10 +504,10 @@ void drawGrid() {
 
 void drawHud() {
   // 1. Header Banner
-  display.fillRect(0, 0, 200, 24, GxEPD_BLACK);
+  display.fillRect(0, 0, 200, 22, GxEPD_BLACK);
   display.setFont(&FreeSansBold9pt7b);
   display.setTextColor(GxEPD_WHITE);
-  display.setCursor(18, 17);
+  display.setCursor(18, 16);
   display.print("STATUS HUD");
 
   // 2. Telemetry items
@@ -463,29 +517,48 @@ void drawHud() {
 
   float volts = readBatteryVoltage();
   bool usbPwr = (volts >= USB_DETECT_THRESHOLD);
-  int battPct = 0;
-  if (volts >= 4.20f) battPct = 100;
-  else if (volts <= 3.30f) battPct = 0;
-  else battPct = (int)((volts - 3.30f) / (4.20f - 3.30f) * 100.0f);
+  bool isCharging = (!usbPwr && volts >= 4.00f);
+  float effVolts = isCharging ? max(3.30f, volts - 0.24f) : volts;
+  int battPct = getLipoPercentage(effVolts);
+  int minsLeft = isCharging ? calculateTimeToFull(battPct) : 0;
 
-  int y = 32;
-  // Battery
+  int y = 28;
+  // Battery line 1: Voltage and State
   display.setCursor(8, y);
   display.print("POWER : ");
   if (usbPwr) {
-    display.print("USB PWR ("); display.print(volts, 2); display.print("V)");
+    display.print("USB 5V DIRECT ("); display.print(volts, 2); display.print("V)");
+  } else if (isCharging) {
+    display.print(volts, 2); display.print("V ["); display.print(battPct); display.print("%] CHARGING");
   } else {
-    display.print(volts, 2); display.print("V ["); display.print(battPct); display.print("%]");
+    display.print(volts, 2); display.print("V ["); display.print(battPct); display.print("%] BATTERY");
   }
 
   // Battery bar graph
-  y += 11;
-  display.drawRect(8, y, 184, 8, GxEPD_BLACK);
+  y += 10;
+  display.drawRect(8, y, 184, 7, GxEPD_BLACK);
   int fillW = usbPwr ? 180 : (int)(180.0f * (battPct / 100.0f));
-  if (fillW > 0) display.fillRect(10, y + 2, fillW, 4, GxEPD_BLACK);
+  if (fillW > 0) display.fillRect(10, y + 2, fillW, 3, GxEPD_BLACK);
+
+  // Time remaining line
+  y += 11;
+  display.setCursor(8, y);
+  if (usbPwr) {
+    display.print("RATE  : Continuous USB Power");
+  } else if (isCharging) {
+    int h = minsLeft / 60;
+    int m = minsLeft % 60;
+    display.print("FULLIN: ~");
+    if (h > 0) { display.print(h); display.print("h "); }
+    display.print(m); display.print("m (1A TP4056)");
+  } else {
+    // Estimating runtime on 4000mAh battery assuming ~35mA avg active/sleep mix
+    int runHours = (int)(((float)BATTERY_CAPACITY_MAH * (battPct / 100.0f)) / 35.0f);
+    display.print("EST.RT: ~"); display.print(runHours); display.print("h remaining (@35mA)");
+  }
 
   // Network & RSSI
-  y += 16;
+  y += 12;
   display.setCursor(8, y);
   display.print("WIFI  : ");
   if (WiFi.status() == WL_CONNECTED) {
@@ -495,7 +568,7 @@ void drawHud() {
   }
 
   // MQTT
-  y += 13;
+  y += 11;
   display.setCursor(8, y);
   display.print("MQTT  : ");
   if (mqttClient.connected()) {
@@ -505,14 +578,14 @@ void drawHud() {
   }
 
   // Active Profile / Bank / Layer
-  y += 13;
+  y += 11;
   display.setCursor(8, y);
   display.print("LAYER : Bank "); display.print(currentBank + 1);
   display.print(" | Slot "); display.print(currentSlot + 1);
   display.print(" (L"); display.print(currentLayer); display.print(")");
 
   // Uptime & Heap
-  y += 13;
+  y += 11;
   unsigned long s = millis() / 1000;
   unsigned long m = s / 60;
   unsigned long h = m / 60;
@@ -524,19 +597,19 @@ void drawHud() {
   display.print(" | Heap "); display.print(ESP.getFreeHeap() / 1024); display.print("KB");
 
   // Discord Mic State
-  y += 13;
+  y += 11;
   display.setCursor(8, y);
   display.print("MIC   : ");
   display.print(isMicMuted ? "[MUTED]" : "[LIVE]");
   if (isAudioModifierHeld) display.print(" | AUD MOD");
 
   // Quick Help
-  y += 15;
+  y += 13;
   display.drawFastHLine(0, y, 200, GxEPD_BLACK);
-  y += 6;
+  y += 5;
   display.setCursor(8, y);
   display.print("AudMod+7: Logitech G321");
-  y += 11;
+  y += 9;
   display.setCursor(8, y);
   display.print("AudMod+8: Edifier Speakers");
 
@@ -768,11 +841,19 @@ const char* getResetReasonString(esp_reset_reason_t reason) {
 void sendHeartbeat() {
   if (!mqttClient.connected()) return;
   float vbat = readBatteryVoltage();
+  bool usbPwr = (vbat >= USB_DETECT_THRESHOLD);
+  bool isCharging = (!usbPwr && vbat >= 4.00f);
+  float effVolts = isCharging ? max(3.30f, vbat - 0.24f) : vbat;
+  int battPct = getLipoPercentage(effVolts);
+  int minsToFull = isCharging ? calculateTimeToFull(battPct) : 0;
   int rssi = WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : 0;
   uint32_t freeHeap = ESP.getFreeHeap();
   uint32_t minHeap = ESP.getMinFreeHeap();
   
   String payload = "{\"device\":\"macropad\",\"state\":\"online\",\"vbat\":" + String(vbat, 2) + 
+                   ",\"batt_pct\":" + String(battPct) +
+                   ",\"charging\":" + (isCharging ? "true" : "false") +
+                   ",\"mins_to_full\":" + String(minsToFull) +
                    ",\"rssi\":" + String(rssi) + 
                    ",\"heap\":" + String(freeHeap) + 
                    ",\"min_heap\":" + String(minHeap) + 
@@ -797,8 +878,16 @@ void setupWebServer() {
 
   server.on("/api/status", HTTP_GET, []() {
     float vbat = readBatteryVoltage();
+    bool usbPwr = (vbat >= USB_DETECT_THRESHOLD);
+    bool isCharging = (!usbPwr && vbat >= 4.00f);
+    float effVolts = isCharging ? max(3.30f, vbat - 0.24f) : vbat;
+    int battPct = getLipoPercentage(effVolts);
+    int minsToFull = isCharging ? calculateTimeToFull(battPct) : 0;
     int rssi = WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : 0;
     String json = "{\"device\":\"macropad\",\"vbat\":" + String(vbat, 2) + 
+                  ",\"batt_pct\":" + String(battPct) +
+                  ",\"charging\":" + (isCharging ? "true" : "false") +
+                  ",\"mins_to_full\":" + String(minsToFull) +
                   ",\"rssi\":" + String(rssi) + 
                   ",\"heap\":" + String(ESP.getFreeHeap()) + 
                   ",\"min_heap\":" + String(ESP.getMinFreeHeap()) + 

@@ -258,7 +258,15 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     fetch('/api/status')
       .then(r => r.json())
       .then(s => {
-        document.getElementById('m-vbat').innerText = `${s.vbat.toFixed(2)} V`;
+        let pwrText = `${s.vbat.toFixed(2)} V (${s.batt_pct || 0}%)`;
+        if (s.vbat >= 4.30) pwrText = `5V USB (${s.vbat.toFixed(2)}V)`;
+        else if (s.charging) {
+          let h = Math.floor((s.mins_to_full || 0) / 60);
+          let m = (s.mins_to_full || 0) % 60;
+          let timeStr = h > 0 ? `${h}h ${m}m` : `${m}m`;
+          pwrText = `${s.vbat.toFixed(2)}V [CHG ${s.batt_pct}% ~${timeStr}]`;
+        }
+        document.getElementById('m-vbat').innerText = pwrText;
         document.getElementById('m-rssi').innerText = `${s.rssi} dBm`;
         document.getElementById('m-heap').innerText = `${Math.round(s.heap / 1024)} KB`;
         document.getElementById('m-layer').innerText = `B${s.bank} L${s.layer}`;
