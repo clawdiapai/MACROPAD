@@ -108,6 +108,11 @@ const unsigned long SLEEP_TIMEOUT = 600000; // 10 minutes idle -> sleep (prevent
 const float LOW_BATTERY_THRESHOLD = 3.3;
 const float USB_DETECT_THRESHOLD = 4.3;
 
+RTC_DATA_ATTR int rtcBank = 0;
+RTC_DATA_ATTR int rtcSlot = 0;
+RTC_DATA_ATTR int rtcLayer = 1;
+RTC_DATA_ATTR bool rtcWasDeepSleep = false;
+
 int currentBank = 0; // 0 = Bank 1 (1-4), 1 = Bank 2 (5-8), 2 = Bank 3 (9-12), 3 = Bank 4 (13-16)
 int currentSlot = 0; // 0..3 (representing keys 1, 2, 3, 4)
 const int MAX_BANKS = 4;
@@ -633,102 +638,44 @@ void setupOTA() {
 // ==========================================
 // SLEEP & MQTT FUNCTIONS
 // ==========================================
-void goToLightSleep() {
-  addDeviceLog("SYS", "SLEEP", "Entering light sleep (idle timeout)");
+void enterDeepSleep(bool isLowBattery) {
+  rtcBank = currentBank;
+  rtcSlot = currentSlot;
+  rtcLayer = currentLayer;
+  rtcWasDeepSleep = true;
+
   if (webServerStarted) {
     server.stop();
     webServerStarted = false;
   }
+
+  if (isLowBattery) {
+    addDeviceLog("SYS", "PWR", "Low battery deep sleep cutoff...");
+    screenMessage = "! LOW BATT SLEEP !";
+    screenMessageDismissTime = 0;
+    fullRefreshNeeded = true;
+    updateScreen();
+  } else {
+    addDeviceLog("SYS", "SLEEP", "Entering idle deep sleep (display preserved)...");
+  }
+
+  // Gracefully power down display controller and LEDs
+  display.powerOff();
+  strip.clear();
+  strip.show();
+
   if (mqttClient.connected()) {
     float vbat = readBatteryVoltage();
-    String sleepMsg = "{\"device\":\"macropad\",\"state\":\"sleeping\",\"reason\":\"idle_timeout\",\"vbat\":" + String(vbat, 2) + ",\"uptime\":" + String(millis()) + "}";
+    String sleepMsg = "{\"device\":\"macropad\",\"state\":\"deep_sleeping\",\"reason\":\"" + String(isLowBattery ? "low_battery" : "idle_timeout") + "\",\"vbat\":" + String(vbat, 2) + "}";
     mqttClient.publish(mqtt_topic_status, sleepMsg.c_str());
     mqttClient.loop();
     delay(20);
-  }
-
-  // Power off E-Ink display booster without triggering power-hungry screen refresh
-  // (E-Ink retains existing macro grid image indefinitely at 0.0 uA)
-  display.powerOff();
-  mqttClient.disconnect();
-  WiFi.disconnect(true);
-  WiFi.mode(WIFI_OFF);
-  
-  isScreenFadeActive = false;
-  strip.clear();
-  strip.show();
-
-  gpio_wakeup_enable((gpio_num_t)MATRIX_INT, GPIO_INTR_LOW_LEVEL);
-  esp_sleep_enable_gpio_wakeup();
-  esp_light_sleep_start();
-
-  // --- WAKE UP ROUTINE (NON-BLOCKING) ---
-  // 1. Release GPIO wakeup and restore interrupt pin pull-up
-  gpio_wakeup_disable((gpio_num_t)MATRIX_INT);
-  pinMode(MATRIX_INT, INPUT_PULLUP);
-
-  // 2. Re-initialize I2C bus after sleep APB clock cycle
-  Wire.end();
-  pinMode(MATRIX_SDA, INPUT_PULLUP);
-  pinMode(MATRIX_SCL, INPUT_PULLUP);
-  recoverI2CBus();
-  Wire.begin(MATRIX_SDA, MATRIX_SCL);
-  Wire.setClock(100000);
-  Wire.setTimeOut(20);
-
-  // 3. Rearm PCF8574 expanders and clear pending INT flags
-  setMatrixIdle();
-  Wire.beginTransmission(PCF_ENCODERS);
-  Wire.write(0xFF);
-  Wire.endTransmission();
-  Wire.requestFrom(PCF_ENCODERS, 1);
-  if (Wire.available()) lastI2cEncState = Wire.read();
-
-  // 4. Restore NeoPixels
-  pinMode(NEOPIXEL_PIN, OUTPUT);
-  strip.begin();
-  strip.setBrightness(100);
-
-  // 5. Restore SPI bus and E-Ink display controller
-  SPI.begin(EPD_SCL, -1, EPD_SDA, EPD_CS);
-  display.init(115200, true, 2, false);
-  display.setRotation(2);
-  display.setTextColor(GxEPD_BLACK);
-
-  // 6. Restore Wi-Fi with brownout-safe TX power
-  WiFi.mode(WIFI_STA);
-  WiFi.setSleep(false);
-  WiFi.setTxPower(WIFI_POWER_15dBm);
-  WiFi.begin(ssid, password);
-  
-  // 7. Instant energetic wake animation and restore active layer LED
-  startWakeAnimation();
-  updateLayerLEDs(true);
-  refreshDisplayLeds();
-  
-  screenMessage = "";
-  lastActivityTime = millis();
-  lastReconnectAttempt = 0;
-  addDeviceLog("SYS", "WAKE", "Woke up from light sleep (GPIO)");
-}
-
-void goToDeepSleep() {
-  addDeviceLog("SYS", "PWR", "Entering Low Battery Deep Sleep...");
-  screenMessage = "! LOW BATT SLEEP !";
-  screenMessageDismissTime = 0;
-  fullRefreshNeeded = true;
-  updateScreen();
-  display.powerOff();
-  strip.clear();
-  strip.show();
-
-  if (mqttClient.connected()) {
-    mqttClient.publish("macropad/status", "{\"device\":\"macropad\",\"status\":\"deep_sleep\"}");
     mqttClient.disconnect();
   }
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
 
+  // Arm PCF8574 expanders and clear interrupt line
   setMatrixIdle();
   esp_deep_sleep_enable_gpio_wakeup(1ULL << MATRIX_INT, ESP_GPIO_WAKEUP_GPIO_LOW);
   esp_deep_sleep_start();
@@ -751,8 +698,11 @@ void handlePowerManagement() {
     return;
   }
   if (now - lastActivityTime > SLEEP_TIMEOUT) {
-    if (cachedVolts > LOW_BATTERY_THRESHOLD) goToLightSleep();
-    else goToDeepSleep();
+    if (cachedVolts <= LOW_BATTERY_THRESHOLD) {
+      enterDeepSleep(true); // Cutoff with ! LOW BATT SLEEP ! banner
+    } else {
+      enterDeepSleep(false); // Idle sleep: retains existing macro grid image at 0.0uA
+    }
   }
 }
 
@@ -949,7 +899,7 @@ void setupWebServer() {
   server.on("/api/test_deep_sleep", HTTP_POST, []() {
     server.send(200, "text/plain", "Entering deep sleep...");
     delay(500);
-    goToDeepSleep();
+    enterDeepSleep(false);
   });
 
   server.begin();
@@ -993,7 +943,9 @@ void handleNetwork() {
           screenMessageDismissTime = 0;
           sendHeartbeat();
           sendDebugLog("INFO", "BOOT", "MacroPad boot complete. Reason: " + String(getResetReasonString(esp_reset_reason())) + ", Vbat: " + String(readBatteryVoltage(), 2) + "V");
-          requestScreenUpdate(true, 50); // Initial clean screen refresh on boot
+          if (esp_reset_reason() != ESP_RST_DEEPSLEEP) {
+            requestScreenUpdate(true, 50); // Initial clean screen refresh on cold power-on boot
+          }
         } else {
           sendHeartbeat();
           sendDebugLog("INFO", "MQTT", "Reconnected to MQTT broker");
@@ -1080,6 +1032,9 @@ void updateLayerLEDs(bool doShow) {
 void selectLayerSlot(int slot) {
   currentSlot = slot;
   currentLayer = (currentBank * 4) + currentSlot + 1;
+  rtcBank = currentBank;
+  rtcSlot = currentSlot;
+  rtcLayer = currentLayer;
   updateLayerLEDs(true);
   screenMessage = "LAYER " + String(currentLayer);
   screenMessageDismissTime = millis() + POPUP_TIMEOUT_MS;
@@ -1091,6 +1046,9 @@ void selectLayerSlot(int slot) {
 void cycleBank() {
   currentBank = (currentBank + 1) % MAX_BANKS;
   currentLayer = (currentBank * 4) + currentSlot + 1;
+  rtcBank = currentBank;
+  rtcSlot = currentSlot;
+  rtcLayer = currentLayer;
   updateLayerLEDs(true);
   screenMessage = "BANK " + String(currentBank + 1) + " L" + String(currentLayer);
   screenMessageDismissTime = millis() + POPUP_TIMEOUT_MS;
@@ -1103,6 +1061,9 @@ void resetToB1L1() {
   currentBank = 0;
   currentSlot = 0;
   currentLayer = 1;
+  rtcBank = 0;
+  rtcSlot = 0;
+  rtcLayer = 1;
   updateLayerLEDs(true);
   screenMessage = "HOME: B1 L1";
   screenMessageDismissTime = millis() + POPUP_TIMEOUT_MS;
@@ -1208,7 +1169,26 @@ void handleAnimations(unsigned long now) {
 void setup() {
   Serial.begin(115200);
 
-  addDeviceLog("SYS", "BOOT", ("System Boot: " + String(getResetReasonString(esp_reset_reason()))).c_str());
+  bool wokeFromDeepSleep = (esp_reset_reason() == ESP_RST_DEEPSLEEP) && rtcWasDeepSleep;
+
+  if (wokeFromDeepSleep) {
+    currentBank = rtcBank;
+    currentSlot = rtcSlot;
+    currentLayer = rtcLayer;
+    isFirstMqttConnect = false;
+    screenNeedsUpdate = false;
+    screenMessage = "";
+    screenMessageDismissTime = 0;
+    addDeviceLog("SYS", "WAKE", ("Woke from Deep Sleep. Restored B" + String(currentBank + 1) + " L" + String(currentLayer)).c_str());
+  } else {
+    rtcBank = 0;
+    rtcSlot = 0;
+    rtcLayer = 1;
+    rtcWasDeepSleep = false;
+    screenMessage = "BOOTING...";
+    screenMessageDismissTime = millis() + 4000;
+    addDeviceLog("SYS", "BOOT", ("System Boot: " + String(getResetReasonString(esp_reset_reason()))).c_str());
+  }
 
   pinMode(BATTERY_PIN, INPUT);
   analogSetAttenuation(ADC_11db); 
@@ -1217,7 +1197,11 @@ void setup() {
   strip.setBrightness(100); 
   strip.clear();
   strip.show(); 
-  startBootAnimation(); 
+  if (wokeFromDeepSleep) {
+    startWakeAnimation();
+  } else {
+    startBootAnimation();
+  }
 
   SPI.begin(EPD_SCL, -1, EPD_SDA, EPD_CS);
   display.init(115200, true, 2, false); 
@@ -1251,7 +1235,6 @@ void setup() {
   setMatrixIdle();
   updateLayerLEDs(true);
   lastActivityTime = millis();
-  screenMessageDismissTime = millis() + 4000;
 }
 
 // ==========================================
