@@ -683,8 +683,7 @@ void enterDeepSleep(bool isLowBattery) {
 
 void handlePowerManagement() {
   if (stayAwakeMode) {
-    lastActivityTime = millis();
-    return;
+    return; // Stay awake mode active: do not sleep
   }
   static unsigned long lastBattCheck = 0;
   static float cachedVolts = 3.8f;
@@ -694,8 +693,7 @@ void handlePowerManagement() {
     cachedVolts = readBatteryVoltage();
   }
   if (cachedVolts >= USB_DETECT_THRESHOLD) {
-    lastActivityTime = now; 
-    return;
+    return; // External USB power: do not sleep
   }
   if (now - lastActivityTime > SLEEP_TIMEOUT) {
     if (cachedVolts <= LOW_BATTERY_THRESHOLD) {
