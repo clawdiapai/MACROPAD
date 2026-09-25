@@ -1,10 +1,17 @@
 import ctypes
 import json
 import logging
+import os
 import time
 from typing import Optional, List
+import threading
 import paho.mqtt.client as mqtt
 from pynput import keyboard
+
+try:
+    from pc_app.discord_rpc import DiscordVoiceRPC
+except ImportError:
+    from discord_rpc import DiscordVoiceRPC
 
 # PYCAW AUDIO CONTROLLER
 try:
@@ -65,6 +72,15 @@ TUYA_DEVICE_ID = "YOUR_TUYA_DEVICE_ID"
 TUYA_IP = "YOUR_TUYA_DEVICE_IP"
 TUYA_LOCAL_KEY = "YOUR_TUYA_LOCAL_KEY"
 TUYA_VERSION = 3.3
+
+# DISCORD VOICE RPC CONFIGURATION (100% RELIABLE LIVE MUTE SYNC)
+# 1. Create an app at https://discord.com/developers/applications (e.g. "MacroPad")
+# 2. Copy "Application ID" -> paste into DISCORD_CLIENT_ID
+# 3. Under OAuth2 tab: copy "Client Secret" -> paste into DISCORD_CLIENT_SECRET
+# 4. Under OAuth2 -> Redirects: Add "http://127.0.0.1" and click Save Changes.
+DISCORD_CLIENT_ID = os.getenv("DISCORD_CLIENT_ID", "YOUR_DISCORD_CLIENT_ID")
+DISCORD_CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET", "YOUR_DISCORD_CLIENT_SECRET")
+discord_rpc_client: Optional[DiscordVoiceRPC] = None
 
 # DISCORD MUTE HOTKEY (CTRL+SHIFT+])
 # VK codes: VK_CONTROL = 0x11, VK_SHIFT = 0x10, VK_OEM_6 = 0xDD (']')
@@ -155,11 +171,23 @@ def publish_mic_state(is_muted: bool):
 is_discord_muted = False
 is_synthetic_send = False
 
+def on_discord_rpc_mute_change(is_muted: bool):
+    """Callback fired in real time whenever Discord voice settings change (from Discord app, hotkeys, or RPC)"""
+    global is_discord_muted
+    is_discord_muted = is_muted
+    status_str = "MIC MUTED" if is_discord_muted else "MIC LIVE"
+    logger.info(f"[Discord RPC Event] Live Mute State: {status_str}")
+    publish_popup(status_str)
+    publish_mic_state(is_discord_muted)
+
 def on_keyboard_hotkey():
-    global is_synthetic_send, is_discord_muted
+    global is_synthetic_send, is_discord_muted, discord_rpc_client
     if is_synthetic_send:
         return
-    logger.info("Physical keyboard hotkey [Ctrl+Shift+] detected")
+    # If Discord Voice RPC is connected, Discord natively handles the hotkey and emits an RPC event
+    if discord_rpc_client and discord_rpc_client.is_authenticated:
+        return
+    logger.info("Physical keyboard hotkey [Ctrl+Shift+] detected (Fallback)")
     is_discord_muted = not is_discord_muted
     status_str = "MIC MUTED" if is_discord_muted else "MIC LIVE"
     publish_popup(status_str)
@@ -191,8 +219,15 @@ def trigger_discord_mute_hotkey():
         is_synthetic_send = False
 
 def toggle_microphone_mute():
-    """Toggles Discord hotkey and default recording microphone mute state"""
-    global is_discord_muted
+    """Toggles Discord mute state (via native RPC if available, fallback to hotkey)"""
+    global is_discord_muted, discord_rpc_client
+
+    if discord_rpc_client and discord_rpc_client.is_authenticated:
+        logger.info(">>> Toggling Discord mute via RPC...")
+        discord_rpc_client.toggle_mute()
+        return
+
+    # Fallback to hotkey simulation if RPC is not connected/configured
     is_discord_muted = not is_discord_muted
 
     if DISCORD_HOTKEY_ENABLED:
@@ -208,7 +243,7 @@ def toggle_microphone_mute():
             logger.debug(f"OS microphone mute sync: {e}")
 
     status_str = "MIC MUTED" if is_discord_muted else "MIC LIVE"
-    logger.info(f">>> Microphone Mute: {status_str}")
+    logger.info(f">>> Microphone Mute (Fallback): {status_str}")
     publish_popup(status_str)
     publish_mic_state(is_discord_muted)
 
@@ -427,6 +462,34 @@ def on_message(client, userdata, msg):
     except Exception as e:
         logger.error(f"Error handling message: {e}")
 
+def start_discord_rpc():
+    """Background worker that connects to Discord Voice RPC and maintains live sync"""
+    global discord_rpc_client
+    if not DISCORD_CLIENT_ID or DISCORD_CLIENT_ID == "YOUR_DISCORD_CLIENT_ID":
+        logger.info("Discord RPC credentials not configured yet. Using Ctrl+Shift+] hotkey fallback.")
+        return
+
+    logger.info("Starting Discord Voice RPC client...")
+    discord_rpc_client = DiscordVoiceRPC(
+        client_id=DISCORD_CLIENT_ID,
+        client_secret=DISCORD_CLIENT_SECRET,
+        on_mute_change=on_discord_rpc_mute_change
+    )
+
+    while True:
+        try:
+            if not discord_rpc_client.is_connected or not discord_rpc_client.is_authenticated:
+                success = discord_rpc_client.connect()
+                if success:
+                    logger.info("Discord Voice RPC client connected and authenticated!")
+                else:
+                    logger.warning("Discord Voice RPC connection attempt failed. Retrying in 10s...")
+            else:
+                time.sleep(2)
+        except Exception as e:
+            logger.warning(f"Discord RPC background monitor error: {e}. Retrying in 10s...")
+        time.sleep(10)
+
 # ==============================================================================
 # MAIN ENTRY POINT
 # ==============================================================================
@@ -435,6 +498,10 @@ def main():
     logger.info("==================================================================")
     logger.info("  MacroPad Windows PC Audio & Discord Controller Bridge Live")
     logger.info("==================================================================")
+
+    # Start Discord Voice RPC background worker thread
+    rpc_thread = threading.Thread(target=start_discord_rpc, daemon=True)
+    rpc_thread.start()
 
     # Start background listener for physical keyboard Ctrl+Shift+]
     try:
