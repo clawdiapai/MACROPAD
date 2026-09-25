@@ -81,6 +81,7 @@ MQTT_BROKER = os.getenv("MQTT_BROKER", "192.168.1.62")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 TOPIC_INPUT = os.getenv("TOPIC_INPUT", "macropad/input")
 TOPIC_DISPLAY = os.getenv("TOPIC_DISPLAY", "macropad/display")
+TOPIC_STATUS = os.getenv("TOPIC_STATUS", "macropad/status")
 
 # TUYA DEVICE CONFIGURATION (IF DIRECT TUYA CONTROL IS USED)
 TUYA_DEVICE_ID = os.getenv("TUYA_DEVICE_ID", "YOUR_TUYA_DEVICE_ID")
@@ -180,7 +181,7 @@ def publish_mic_state(is_muted: bool):
     global mqtt_client
     if mqtt_client and mqtt_client.is_connected():
         payload = {"mic_muted": is_muted}
-        mqtt_client.publish(TOPIC_DISPLAY, json.dumps(payload))
+        mqtt_client.publish(TOPIC_DISPLAY, json.dumps(payload), retain=True)
 
 is_discord_muted = False
 is_synthetic_send = False
@@ -410,15 +411,21 @@ def switch_default_playback_device(target: str) -> Optional[str]:
 def on_connect(client, userdata, flags, rc, properties=None):
     if rc == 0:
         logger.info(f"Connected to MQTT broker at {MQTT_BROKER}")
-        client.subscribe(TOPIC_INPUT)
-        logger.info(f"Subscribed to topic: {TOPIC_INPUT}")
-        # Sync current mic status to MacroPad on connect
+        client.subscribe([(TOPIC_INPUT, 0), (TOPIC_STATUS, 0)])
+        logger.info(f"Subscribed to topics: {TOPIC_INPUT}, {TOPIC_STATUS}")
+        # Sync current mic status to MacroPad on connect (retained so device gets it whenever it powers on)
         publish_mic_state(is_discord_muted)
     else:
         logger.error(f"MQTT connection failed with code {rc}")
 
 def on_message(client, userdata, msg):
     try:
+        # MacroPad status / heartbeat topic (fires when device powers on, reconnects, or wakes up)
+        if msg.topic == TOPIC_STATUS:
+            logger.info("MacroPad device presence detected -> syncing mic mute state")
+            publish_mic_state(is_discord_muted)
+            return
+
         payload = json.loads(msg.payload.decode('utf-8'))
         action = payload.get("action")
         modifier = payload.get("modifier", False)
