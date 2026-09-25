@@ -65,12 +65,12 @@ TUYA_IP = "YOUR_TUYA_DEVICE_IP"
 TUYA_LOCAL_KEY = "YOUR_TUYA_LOCAL_KEY"
 TUYA_VERSION = 3.3
 
-# DISCORD MUTE HOTKEY (DEFAULT: CTRL+SHIFT+M)
-# VK codes: VK_CONTROL = 0x11, VK_SHIFT = 0x10, VK_M = 0x4D
+# DISCORD MUTE HOTKEY (CTRL+SHIFT+])
+# VK codes: VK_CONTROL = 0x11, VK_SHIFT = 0x10, VK_OEM_6 = 0xDD (']')
 DISCORD_HOTKEY_ENABLED = True
 VK_CONTROL = 0x11
 VK_SHIFT = 0x10
-VK_M = 0x4D
+VK_CLOSE_BRACKET = 0xDD  # ']' (VK_OEM_6)
 KEYEVENTF_KEYUP = 0x0002
 
 # APP TARGET PROCESS GROUPS
@@ -111,16 +111,16 @@ def publish_mic_state(is_muted: bool):
         mqtt_client.publish(TOPIC_DISPLAY, json.dumps(payload))
 
 def trigger_discord_mute_hotkey():
-    """Simulates pressing Ctrl+Shift+M (Discord's default toggle mute hotkey)"""
+    """Simulates pressing Ctrl+Shift+] (Discord toggle mute hotkey)"""
     try:
         ctypes.windll.user32.keybd_event(VK_CONTROL, 0, 0, 0)
         ctypes.windll.user32.keybd_event(VK_SHIFT, 0, 0, 0)
-        ctypes.windll.user32.keybd_event(VK_M, 0, 0, 0)
+        ctypes.windll.user32.keybd_event(VK_CLOSE_BRACKET, 0, 0, 0)
         time.sleep(0.02)
-        ctypes.windll.user32.keybd_event(VK_M, 0, KEYEVENTF_KEYUP, 0)
+        ctypes.windll.user32.keybd_event(VK_CLOSE_BRACKET, 0, KEYEVENTF_KEYUP, 0)
         ctypes.windll.user32.keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYUP, 0)
         ctypes.windll.user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
-        logger.info("Sent Discord toggle mute hotkey (Ctrl+Shift+M)")
+        logger.info("Sent Discord toggle mute hotkey (Ctrl+Shift+])")
     except Exception as e:
         logger.error(f"Failed to send Discord hotkey: {e}")
 
