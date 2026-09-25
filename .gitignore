@@ -25,3 +25,5 @@ venv/
 # Logs & environment
 *.log
 .env
+pc_app/discord_token.json
+*token.json

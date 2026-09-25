@@ -9,6 +9,21 @@ import paho.mqtt.client as mqtt
 from pynput import keyboard
 
 try:
+    from dotenv import load_dotenv, find_dotenv
+    # Look for .env in current working dir, pc_app dir, or parent repo root
+    _env_path = find_dotenv(usecwd=True)
+    if not _env_path:
+        _script_dir = os.path.dirname(os.path.abspath(__file__))
+        for _candidate in [os.path.join(_script_dir, ".env"), os.path.join(os.path.dirname(_script_dir), ".env")]:
+            if os.path.exists(_candidate):
+                _env_path = _candidate
+                break
+    if _env_path:
+        load_dotenv(_env_path)
+except ImportError:
+    pass
+
+try:
     from pc_app.discord_rpc import DiscordVoiceRPC
 except ImportError:
     from discord_rpc import DiscordVoiceRPC
@@ -60,26 +75,25 @@ except Exception:
     TINAP_AVAILABLE = False
 
 # ==============================================================================
-# CONFIGURATION
+# CONFIGURATION (.env supported)
 # ==============================================================================
-MQTT_BROKER = "192.168.1.62"
-MQTT_PORT = 1883
-TOPIC_INPUT = "macropad/input"
-TOPIC_DISPLAY = "macropad/display"
+MQTT_BROKER = os.getenv("MQTT_BROKER", "192.168.1.62")
+MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
+TOPIC_INPUT = os.getenv("TOPIC_INPUT", "macropad/input")
+TOPIC_DISPLAY = os.getenv("TOPIC_DISPLAY", "macropad/display")
 
 # TUYA DEVICE CONFIGURATION (IF DIRECT TUYA CONTROL IS USED)
-TUYA_DEVICE_ID = "YOUR_TUYA_DEVICE_ID"
-TUYA_IP = "YOUR_TUYA_DEVICE_IP"
-TUYA_LOCAL_KEY = "YOUR_TUYA_LOCAL_KEY"
-TUYA_VERSION = 3.3
+TUYA_DEVICE_ID = os.getenv("TUYA_DEVICE_ID", "YOUR_TUYA_DEVICE_ID")
+TUYA_IP = os.getenv("TUYA_IP", "YOUR_TUYA_DEVICE_IP")
+TUYA_LOCAL_KEY = os.getenv("TUYA_LOCAL_KEY", "YOUR_TUYA_LOCAL_KEY")
+TUYA_VERSION = float(os.getenv("TUYA_VERSION", "3.3"))
 
 # DISCORD VOICE RPC CONFIGURATION (100% RELIABLE LIVE MUTE SYNC)
-# 1. Create an app at https://discord.com/developers/applications (e.g. "MacroPad")
-# 2. Copy "Application ID" -> paste into DISCORD_CLIENT_ID
-# 3. Under OAuth2 tab: copy "Client Secret" -> paste into DISCORD_CLIENT_SECRET
-# 4. Under OAuth2 -> Redirects: Add "http://127.0.0.1" and click Save Changes.
-DISCORD_CLIENT_ID = os.getenv("DISCORD_CLIENT_ID", "YOUR_DISCORD_CLIENT_ID")
-DISCORD_CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET", "YOUR_DISCORD_CLIENT_SECRET")
+# Set in .env file:
+# DISCORD_CLIENT_ID=...
+# DISCORD_CLIENT_SECRET=...
+DISCORD_CLIENT_ID = os.getenv("DISCORD_CLIENT_ID", "").strip()
+DISCORD_CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET", "").strip()
 discord_rpc_client: Optional[DiscordVoiceRPC] = None
 
 # DISCORD MUTE HOTKEY (CTRL+SHIFT+])
@@ -466,7 +480,7 @@ def start_discord_rpc():
     """Background worker that connects to Discord Voice RPC and maintains live sync"""
     global discord_rpc_client
     if not DISCORD_CLIENT_ID or DISCORD_CLIENT_ID == "YOUR_DISCORD_CLIENT_ID":
-        logger.info("Discord RPC credentials not configured yet. Using Ctrl+Shift+] hotkey fallback.")
+        logger.info("Discord RPC credentials not configured in .env. Using Ctrl+Shift+] hotkey fallback.")
         return
 
     logger.info("Starting Discord Voice RPC client...")
