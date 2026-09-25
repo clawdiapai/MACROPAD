@@ -1771,18 +1771,9 @@ void loop() {
 
         // If released without using modifier (short tap OR held without turning encoder/keys):
         if (!wasHeldAsMod || !isAudioModifierUsed) {
-          isMicMuted = !isMicMuted;
-          sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"mic_mute_toggle\", \"muted\":" + (isMicMuted ? "true" : "false") + "}");
-          addDeviceLog("INP", "MIC", isMicMuted ? "Discord Mic: MUTED" : "Discord Mic: LIVE");
-          int px = keyToLedMap[13];
-          if (isMicMuted) {
-            strip.setPixelColor(px, strip.Color(255, 0, 0)); // Red when muted!
-            strip.show();
-          } else {
-            strip.setPixelColor(px, strip.Color(0, 255, 0)); // Green flash when unmuted!
-            strip.show();
-            ledTurnOffTime[px] = now + 250;
-          }
+          sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"mic_mute_toggle\"}");
+          addDeviceLog("INP", "MIC", "Toggled Mic Mute (request sent to PC)");
+          setKeyLED(13, strip.Color(255, 180, 0), 120); // Amber touch feedback while waiting for PC sync
         } else {
           addDeviceLog("INP", "MOD2", "Audio Modifier released");
         }

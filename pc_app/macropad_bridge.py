@@ -4,6 +4,7 @@ import logging
 import time
 from typing import Optional, List
 import paho.mqtt.client as mqtt
+from pynput import keyboard
 
 # PYCAW AUDIO CONTROLLER
 try:
@@ -151,8 +152,23 @@ def publish_mic_state(is_muted: bool):
         payload = {"mic_muted": is_muted}
         mqtt_client.publish(TOPIC_DISPLAY, json.dumps(payload))
 
+is_discord_muted = False
+is_synthetic_send = False
+
+def on_keyboard_hotkey():
+    global is_synthetic_send, is_discord_muted
+    if is_synthetic_send:
+        return
+    logger.info("Physical keyboard hotkey [Ctrl+Shift+] detected")
+    is_discord_muted = not is_discord_muted
+    status_str = "MIC MUTED" if is_discord_muted else "MIC LIVE"
+    publish_popup(status_str)
+    publish_mic_state(is_discord_muted)
+
 def trigger_discord_mute_hotkey():
     """Simulates pressing Ctrl+Shift+] using hardware scan codes via SendInput"""
+    global is_synthetic_send
+    is_synthetic_send = True
     try:
         # Key down sequence: Ctrl -> Shift -> ]
         _send_scancode_key(VK_CONTROL, SCAN_LCTRL, False)
@@ -170,33 +186,31 @@ def trigger_discord_mute_hotkey():
         logger.info("Sent Discord toggle mute hotkey (Ctrl+Shift+]) via SendInput scan codes")
     except Exception as e:
         logger.error(f"Failed to send Discord hotkey: {e}")
+    finally:
+        time.sleep(0.05)
+        is_synthetic_send = False
 
 def toggle_microphone_mute():
     """Toggles Discord hotkey and default recording microphone mute state"""
+    global is_discord_muted
+    is_discord_muted = not is_discord_muted
+
     if DISCORD_HOTKEY_ENABLED:
         trigger_discord_mute_hotkey()
 
-    if not PYCAW_AVAILABLE:
-        logger.warning("pycaw is not available")
-        return
+    if PYCAW_AVAILABLE:
+        try:
+            mic = AudioUtilities.GetMicrophone()
+            if mic:
+                vol_interface = cast(mic.Activate(IAudioEndpointVolume._iid_, 7, None), POINTER(IAudioEndpointVolume))
+                vol_interface.SetMute(is_discord_muted, None)
+        except Exception as e:
+            logger.debug(f"OS microphone mute sync: {e}")
 
-    try:
-        mic = AudioUtilities.GetMicrophone()
-        if not mic:
-            logger.warning("No default microphone found")
-            return
-        
-        vol_interface = cast(mic.Activate(IAudioEndpointVolume._iid_, 7, None), POINTER(IAudioEndpointVolume))
-        current_mute = vol_interface.GetMute()
-        new_mute = not current_mute
-        vol_interface.SetMute(new_mute, None)
-
-        status_str = "MIC MUTED" if new_mute else "MIC LIVE"
-        logger.info(f">>> Microphone Mute: {status_str}")
-        publish_popup(status_str)
-        publish_mic_state(new_mute)
-    except Exception as e:
-        logger.error(f"Error toggling microphone: {e}")
+    status_str = "MIC MUTED" if is_discord_muted else "MIC LIVE"
+    logger.info(f">>> Microphone Mute: {status_str}")
+    publish_popup(status_str)
+    publish_mic_state(is_discord_muted)
 
 def adjust_master_volume(delta: int):
     """Adjusts Windows master volume up/down"""
@@ -349,6 +363,8 @@ def on_connect(client, userdata, flags, rc, properties=None):
         logger.info(f"Connected to MQTT broker at {MQTT_BROKER}")
         client.subscribe(TOPIC_INPUT)
         logger.info(f"Subscribed to topic: {TOPIC_INPUT}")
+        # Sync current mic status to MacroPad on connect
+        publish_mic_state(is_discord_muted)
     else:
         logger.error(f"MQTT connection failed with code {rc}")
 
@@ -419,6 +435,17 @@ def main():
     logger.info("==================================================================")
     logger.info("  MacroPad Windows PC Audio & Discord Controller Bridge Live")
     logger.info("==================================================================")
+
+    # Start background listener for physical keyboard Ctrl+Shift+]
+    try:
+        hotkeys = keyboard.GlobalHotKeys({
+            '<ctrl>+<shift>+]': on_keyboard_hotkey
+        })
+        hotkeys.daemon = True
+        hotkeys.start()
+        logger.info("Listening for physical keyboard [Ctrl+Shift+] hotkey...")
+    except Exception as e:
+        logger.warning(f"Could not start physical keyboard listener: {e}")
 
     mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     mqtt_client.on_connect = on_connect
