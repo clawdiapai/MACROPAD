@@ -67,11 +67,52 @@ TUYA_VERSION = 3.3
 
 # DISCORD MUTE HOTKEY (CTRL+SHIFT+])
 # VK codes: VK_CONTROL = 0x11, VK_SHIFT = 0x10, VK_OEM_6 = 0xDD (']')
+# Hardware Scan Codes (Set 1): Left Ctrl = 0x1D, Left Shift = 0x2A, Close Bracket ']' = 0x1B
 DISCORD_HOTKEY_ENABLED = True
 VK_CONTROL = 0x11
 VK_SHIFT = 0x10
-VK_CLOSE_BRACKET = 0xDD  # ']' (VK_OEM_6)
+VK_CLOSE_BRACKET = 0xDD
+SCAN_LCTRL = 0x1D
+SCAN_LSHIFT = 0x2A
+SCAN_CLOSE_BRACKET = 0x1B
+
+INPUT_KEYBOARD = 1
 KEYEVENTF_KEYUP = 0x0002
+KEYEVENTF_SCANCODE = 0x0008
+
+PUL = ctypes.POINTER(ctypes.c_ulong)
+class KeyBdInput(ctypes.Structure):
+    _fields_ = [('wVk', ctypes.c_ushort),
+                ('wScan', ctypes.c_ushort),
+                ('dwFlags', ctypes.c_ulong),
+                ('time', ctypes.c_ulong),
+                ('dwExtraInfo', PUL)]
+class HardwareInput(ctypes.Structure):
+    _fields_ = [('uMsg', ctypes.c_ulong),
+                ('wParamL', ctypes.c_short),
+                ('wParamH', ctypes.c_ushort)]
+class MouseInput(ctypes.Structure):
+    _fields_ = [('dx', ctypes.c_long),
+                ('dy', ctypes.c_long),
+                ('mouseData', ctypes.c_ulong),
+                ('dwFlags', ctypes.c_ulong),
+                ('time', ctypes.c_ulong),
+                ('dwExtraInfo', PUL)]
+class Input_I(ctypes.Union):
+    _fields_ = [('ki', KeyBdInput),
+                ('mi', MouseInput),
+                ('hi', HardwareInput)]
+class Input(ctypes.Structure):
+    _fields_ = [('type', ctypes.c_ulong),
+                ('ii', Input_I)]
+
+def _send_scancode_key(vk: int, scan_code: int, is_up: bool = False):
+    extra = ctypes.c_ulong(0)
+    ii_ = Input_I()
+    flags = KEYEVENTF_SCANCODE | (KEYEVENTF_KEYUP if is_up else 0)
+    ii_.ki = KeyBdInput(vk, scan_code, flags, 0, ctypes.pointer(extra))
+    x = Input(ctypes.c_ulong(INPUT_KEYBOARD), ii_)
+    ctypes.windll.user32.SendInput(1, ctypes.pointer(x), ctypes.sizeof(x))
 
 # APP TARGET PROCESS GROUPS
 APP_TARGETS = ["fortnite", "browser", "music"]
@@ -111,21 +152,30 @@ def publish_mic_state(is_muted: bool):
         mqtt_client.publish(TOPIC_DISPLAY, json.dumps(payload))
 
 def trigger_discord_mute_hotkey():
-    """Simulates pressing Ctrl+Shift+] (Discord toggle mute hotkey)"""
+    """Simulates pressing Ctrl+Shift+] using hardware scan codes via SendInput"""
     try:
-        ctypes.windll.user32.keybd_event(VK_CONTROL, 0, 0, 0)
-        ctypes.windll.user32.keybd_event(VK_SHIFT, 0, 0, 0)
-        ctypes.windll.user32.keybd_event(VK_CLOSE_BRACKET, 0, 0, 0)
+        # Key down sequence: Ctrl -> Shift -> ]
+        _send_scancode_key(VK_CONTROL, SCAN_LCTRL, False)
         time.sleep(0.02)
-        ctypes.windll.user32.keybd_event(VK_CLOSE_BRACKET, 0, KEYEVENTF_KEYUP, 0)
-        ctypes.windll.user32.keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYUP, 0)
-        ctypes.windll.user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
-        logger.info("Sent Discord toggle mute hotkey (Ctrl+Shift+])")
+        _send_scancode_key(VK_SHIFT, SCAN_LSHIFT, False)
+        time.sleep(0.02)
+        _send_scancode_key(VK_CLOSE_BRACKET, SCAN_CLOSE_BRACKET, False)
+        time.sleep(0.06)
+        # Key up sequence: ] -> Shift -> Ctrl
+        _send_scancode_key(VK_CLOSE_BRACKET, SCAN_CLOSE_BRACKET, True)
+        time.sleep(0.02)
+        _send_scancode_key(VK_SHIFT, SCAN_LSHIFT, True)
+        time.sleep(0.02)
+        _send_scancode_key(VK_CONTROL, SCAN_LCTRL, True)
+        logger.info("Sent Discord toggle mute hotkey (Ctrl+Shift+]) via SendInput scan codes")
     except Exception as e:
         logger.error(f"Failed to send Discord hotkey: {e}")
 
 def toggle_microphone_mute():
-    """Toggles default recording microphone mute state and Discord hotkey"""
+    """Toggles Discord hotkey and default recording microphone mute state"""
+    if DISCORD_HOTKEY_ENABLED:
+        trigger_discord_mute_hotkey()
+
     if not PYCAW_AVAILABLE:
         logger.warning("pycaw is not available")
         return
@@ -140,9 +190,6 @@ def toggle_microphone_mute():
         current_mute = vol_interface.GetMute()
         new_mute = not current_mute
         vol_interface.SetMute(new_mute, None)
-
-        if DISCORD_HOTKEY_ENABLED:
-            trigger_discord_mute_hotkey()
 
         status_str = "MIC MUTED" if new_mute else "MIC LIVE"
         logger.info(f">>> Microphone Mute: {status_str}")

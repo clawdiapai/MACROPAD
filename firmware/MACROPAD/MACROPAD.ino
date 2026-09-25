@@ -194,6 +194,7 @@ unsigned long key13LastSeenTime = 0;
 bool key13PhysicallyPressed = false;
 bool key13Held = false;
 bool isAudioModifierHeld = false;
+bool isAudioModifierUsed = false;
 bool isMicMuted = false;
 
 unsigned long screenMessageDismissTime = 0;
@@ -1455,6 +1456,7 @@ void loop() {
       enc1PendingDelta = 0;
       lastEnc1SendTime = now;
       if (isAudioModifierHeld) {
+        isAudioModifierUsed = true;
         sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"audio_master_volume\", \"id\":1, \"delta\":" + String(sendVal) + "}");
         addDeviceLog("INP", "AUDIO", ("Master Vol: " + String(sendVal)).c_str());
       } else {
@@ -1469,6 +1471,7 @@ void loop() {
       lastEnc1ClickTime = now;
       lastActivityTime = now; 
       if (isAudioModifierHeld) {
+        isAudioModifierUsed = true;
         sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"audio_master_reset\", \"id\":1, \"volume\":80}");
         addDeviceLog("INP", "AUDIO", "Master Vol Reset 80%");
       } else {
@@ -1505,6 +1508,7 @@ void loop() {
         if (now - lastEnc2Trigger > ENC_DEBOUNCE) { 
           int delta = (e2Dt == HIGH) ? 1 : -1;
           if (isAudioModifierHeld) {
+            isAudioModifierUsed = true;
             sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"audio_discord_volume\", \"id\":2, \"delta\":" + String(delta) + "}");
             addDeviceLog("INP", "AUDIO", ("Discord Vol: " + String(delta)).c_str());
           } else {
@@ -1517,6 +1521,7 @@ void loop() {
       if (e2Sw && !enc2ButtonState) {
         lastActivityTime = now;
         if (isAudioModifierHeld) {
+          isAudioModifierUsed = true;
           sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"audio_discord_reset\", \"id\":2, \"volume\":80}");
           addDeviceLog("INP", "AUDIO", "Discord Vol Reset 80%");
         } else {
@@ -1530,6 +1535,7 @@ void loop() {
         if (now - lastEnc3Trigger > ENC_DEBOUNCE) { 
           int delta = (e3Dt == HIGH) ? 1 : -1;
           if (isAudioModifierHeld) {
+            isAudioModifierUsed = true;
             sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"audio_app_volume\", \"id\":3, \"delta\":" + String(delta) + "}");
             addDeviceLog("INP", "AUDIO", ("App Vol: " + String(delta)).c_str());
           } else {
@@ -1557,6 +1563,7 @@ void loop() {
         if (!enc3LongTriggered) {
           // Short tap (< 500ms)
           if (isAudioModifierHeld) {
+            isAudioModifierUsed = true;
             sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"audio_app_toggle\", \"id\":3}");
             addDeviceLog("INP", "AUDIO", "App Target Toggle");
           } else if (isModifierHeld) {
@@ -1620,6 +1627,7 @@ void loop() {
               else if (id != 5 && id != 13) {
                 if (isAudioModifierHeld) {
                   if (id == 7) {
+                    isAudioModifierUsed = true;
                     sendPayload("{\"device\":\"macropad\", \"action\":\"audio_device_select\", \"target\":\"headphones\"}");
                     addDeviceLog("INP", "AUDIO", "Output -> Logitech G321");
                     setKeyLED(7, strip.Color(0, 240, 255), 400); // Bright cyan confirmation
@@ -1627,6 +1635,7 @@ void loop() {
                     screenMessageDismissTime = millis() + 2000;
                     requestScreenUpdate(false, 100);
                   } else if (id == 8) {
+                    isAudioModifierUsed = true;
                     sendPayload("{\"device\":\"macropad\", \"action\":\"audio_device_select\", \"target\":\"speakers\"}");
                     addDeviceLog("INP", "AUDIO", "Output -> Edifier Speakers");
                     setKeyLED(8, strip.Color(255, 180, 0), 400); // Bright amber confirmation
@@ -1734,6 +1743,7 @@ void loop() {
         key13PhysicallyPressed = true;
         key13PressTime = now;
         key13Held = false;
+        isAudioModifierUsed = false;
       } else if (!key13Held && (now - key13PressTime >= HOLD_MODIFIER_MS)) {
         key13Held = true;
         isAudioModifierHeld = true;
@@ -1748,17 +1758,19 @@ void loop() {
       // Key 13 not seen on this scan. Only declare released after 80ms of continuous absence
       if (key13PhysicallyPressed && (now - key13LastSeenTime > 80)) {
         key13PhysicallyPressed = false;
+        bool wasHeldAsMod = key13Held;
         if (key13Held) {
           isAudioModifierHeld = false;
           key13Held = false;
-          addDeviceLog("INP", "MOD2", "Audio Modifier released");
           int px = keyToLedMap[13];
           strip.setPixelColor(px, isMicMuted ? strip.Color(255, 0, 0) : strip.Color(0, 0, 0));
           strip.setPixelColor(keyToLedMap[7], strip.Color(0, 0, 0));
           strip.setPixelColor(keyToLedMap[8], strip.Color(0, 0, 0));
           strip.show();
-        } else {
-          // Short tap (< HOLD_MODIFIER_MS) -> Toggle Discord Mic Mute
+        }
+
+        // If released without using modifier (short tap OR held without turning encoder/keys):
+        if (!wasHeldAsMod || !isAudioModifierUsed) {
           isMicMuted = !isMicMuted;
           sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"mic_mute_toggle\", \"muted\":" + (isMicMuted ? "true" : "false") + "}");
           addDeviceLog("INP", "MIC", isMicMuted ? "Discord Mic: MUTED" : "Discord Mic: LIVE");
@@ -1771,6 +1783,8 @@ void loop() {
             strip.show();
             ledTurnOffTime[px] = now + 250;
           }
+        } else {
+          addDeviceLog("INP", "MOD2", "Audio Modifier released");
         }
       }
     }
