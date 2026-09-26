@@ -186,6 +186,87 @@ def publish_mic_state(is_muted: bool):
 is_discord_muted = False
 is_synthetic_send = False
 
+# ==============================================================================
+# DISCORD VOICE CALL MEMBERS & GRID MANAGEMENT
+# ==============================================================================
+is_audio_mod_active = False
+voice_page = 0
+active_voice_members = []
+normal_grid_labels = ["ACT 1", "ACT 2", "ACT 3", "ACT 4", "ACT 5", "ACT 6", "ACT 7", "ACT 8", "ACT 9"]
+
+def build_voice_labels(members: list, page: int):
+    """Formats voice call members into 3x3 matrix labels with pagination"""
+    total = len(members)
+    labels = [""] * 9
+    if total == 0:
+        return labels, 1
+
+    if total <= 9:
+        total_pages = 1
+        for i in range(min(9, total)):
+            m = members[i]
+            prefix = "*" if m.get("speaking") else ""
+            vol = m.get("volume", 100)
+            name = m.get("name", "User")
+            if m.get("is_self"):
+                labels[i] = f"{name}\nYOU"
+            else:
+                labels[i] = f"{prefix}{name}\n{vol}%"
+        return labels, total_pages
+    else:
+        # More than 9 members: use first 7 slots for users, last 2 slots for pagination
+        page_size = 7
+        total_pages = (total + page_size - 1) // page_size
+        page = max(0, min(total_pages - 1, page))
+        start = page * page_size
+        page_members = members[start:start + page_size]
+        for i in range(7):
+            if i < len(page_members):
+                m = page_members[i]
+                prefix = "*" if m.get("speaking") else ""
+                vol = m.get("volume", 100)
+                name = m.get("name", "User")
+                if m.get("is_self"):
+                    labels[i] = f"{name}\nYOU"
+                else:
+                    labels[i] = f"{prefix}{name}\n{vol}%"
+            else:
+                labels[i] = ""
+        # Last 2 buttons for page down / page up
+        labels[7] = f"P{page+1}/{total_pages} <"
+        labels[8] = f"P{page+1}/{total_pages} >"
+        return labels, total_pages
+
+def publish_voice_grid(page_changed: bool = False):
+    """Publishes current voice call members to the 3x3 matrix on the MacroPad"""
+    global active_voice_members, voice_page
+    if not discord_rpc_client or not discord_rpc_client.is_authenticated:
+        return
+    channel = discord_rpc_client.voice_channel
+    if not channel or not channel.get("members"):
+        if mqtt_client and mqtt_client.is_connected():
+            mqtt_client.publish(TOPIC_DISPLAY, json.dumps({"in_call": False}), retain=True)
+        return
+
+    active_voice_members = channel["members"]
+    labels, total_pages = build_voice_labels(active_voice_members, voice_page)
+    payload = {
+        "labels": labels,
+        "in_call": True,
+        "fast": True
+    }
+    if mqtt_client and mqtt_client.is_connected():
+        mqtt_client.publish(TOPIC_DISPLAY, json.dumps(payload), retain=True)
+        logger.info(f"Published voice member grid ({len(active_voice_members)} members, page {voice_page + 1}/{total_pages})")
+
+def on_voice_channel_update(voice_channel):
+    """Callback fired when voice call membership or status changes"""
+    global is_audio_mod_active
+    ch_name = voice_channel.get('name') if voice_channel else 'No call'
+    logger.info(f"[Discord Voice Event] Channel update: {ch_name}")
+    if is_audio_mod_active:
+        publish_voice_grid()
+
 def on_discord_rpc_mute_change(is_muted: bool):
     """Callback fired in real time whenever Discord voice settings change (from Discord app, hotkeys, or RPC)"""
     global is_discord_muted
@@ -468,6 +549,69 @@ def on_message(client, userdata, msg):
             switch_default_playback_device(target)
 
         # ----------------------------------------------------------------------
+        # DISCORD VOICE CALL MEMBER CONTROLS (AUDIO MODIFIER + 3x3 MATRIX)
+        # ----------------------------------------------------------------------
+        elif action == "audio_modifier":
+            active = payload.get("active", False)
+            is_audio_mod_active = active
+            logger.info(f">>> Key 13 Audio Modifier state: {'HELD' if active else 'RELEASED'}")
+            if active:
+                if discord_rpc_client and discord_rpc_client.is_authenticated:
+                    discord_rpc_client.refresh_voice_channel()
+                    channel = discord_rpc_client.voice_channel
+                    if channel and channel.get("members"):
+                        voice_page = 0
+                        publish_voice_grid()
+                    else:
+                        if mqtt_client and mqtt_client.is_connected():
+                            mqtt_client.publish(TOPIC_DISPLAY, json.dumps({"in_call": False}), retain=True)
+            else:
+                # Modifier released -> restore normal layer's grid labels
+                if mqtt_client and mqtt_client.is_connected():
+                    mqtt_client.publish(TOPIC_DISPLAY, json.dumps({
+                        "labels": normal_grid_labels,
+                        "in_call": False,
+                        "fast": True
+                    }), retain=True)
+
+        elif action == "discord_page_down":
+            if active_voice_members and len(active_voice_members) > 9:
+                page_size = 7
+                total_pages = (len(active_voice_members) + page_size - 1) // page_size
+                voice_page = max(0, voice_page - 1)
+                publish_voice_grid(page_changed=True)
+                publish_popup(f"PAGE {voice_page + 1}/{total_pages}")
+
+        elif action == "discord_page_up":
+            if active_voice_members and len(active_voice_members) > 9:
+                page_size = 7
+                total_pages = (len(active_voice_members) + page_size - 1) // page_size
+                voice_page = min(total_pages - 1, voice_page + 1)
+                publish_voice_grid(page_changed=True)
+                publish_popup(f"PAGE {voice_page + 1}/{total_pages}")
+
+        elif action == "discord_user_volume":
+            user_idx = payload.get("user_index", 1)  # 1 to 9
+            delta = payload.get("delta", 0)
+            if len(active_voice_members) <= 9:
+                m_idx = user_idx - 1
+            else:
+                m_idx = (voice_page * 7) + (user_idx - 1)
+            
+            if 0 <= m_idx < len(active_voice_members):
+                member = active_voice_members[m_idx]
+                uid = member["id"]
+                curr_vol = member.get("volume", 100)
+                step = 5 * delta # 5% per encoder tick
+                new_vol = max(0, min(200, curr_vol + step))
+                member["volume"] = new_vol
+                if discord_rpc_client and discord_rpc_client.is_authenticated:
+                    discord_rpc_client.set_user_volume(uid, new_vol)
+                logger.info(f">>> User {member['name']} Volume -> {new_vol}% (delta={delta})")
+                publish_popup(f"{member['name'].upper()}:\n{new_vol}%")
+                publish_voice_grid()
+
+        # ----------------------------------------------------------------------
         # 2. KEY 5 ACTIONS: ROOM LIGHTING & PRESETS
         # ----------------------------------------------------------------------
         elif action == "light_toggle":
@@ -494,7 +638,8 @@ def start_discord_rpc():
     discord_rpc_client = DiscordVoiceRPC(
         client_id=DISCORD_CLIENT_ID,
         client_secret=DISCORD_CLIENT_SECRET,
-        on_mute_change=on_discord_rpc_mute_change
+        on_mute_change=on_discord_rpc_mute_change,
+        on_voice_channel_update=on_voice_channel_update
     )
 
     while True:

@@ -196,6 +196,7 @@ bool key13Held = false;
 bool isAudioModifierHeld = false;
 bool isAudioModifierUsed = false;
 bool isMicMuted = false;
+bool inVoiceCall = false;
 
 unsigned long screenMessageDismissTime = 0;
 const unsigned long POPUP_TIMEOUT_MS = 2000;
@@ -205,6 +206,15 @@ const int dynIdxToKeyID[10] = {0, 6, 7, 8, 10, 11, 12, 14, 15, 16};
 unsigned long dynKeyPressTime[10] = {0};
 bool dynKeyHeld[10] = {false};
 const unsigned long PRESET_LONG_PRESS_MS = 600;
+bool currentScanState[17] = {false};
+
+int getHeld3x3UserKey() {
+  for (int k = 1; k <= 9; k++) {
+    int keyId = dynIdxToKeyID[k];
+    if (currentScanState[keyId]) return k;
+  }
+  return 0;
+}
 
 bool fullRefreshNeeded = true;
 bool screenNeedsUpdate = true;
@@ -483,12 +493,28 @@ void drawGrid() {
         lbl = lbl.substring(1); 
       }
 
-      int textX = cellX + 4; 
-      int textY = cellY + 45; 
-      display.setCursor(textX, textY);
-      
-      if (lbl.length() > 6) lbl = lbl.substring(0, 5) + ".";
-      display.print(lbl);
+      int newlineIdx = lbl.indexOf('\n');
+      if (newlineIdx >= 0) {
+        String l1 = lbl.substring(0, newlineIdx);
+        String l2 = lbl.substring(newlineIdx + 1);
+        if (l1.length() > 6) l1 = l1.substring(0, 5) + ".";
+        display.setFont(&FreeSansBold9pt7b);
+        display.setTextSize(1);
+        display.setCursor(cellX + 4, cellY + 28);
+        display.print(l1);
+        display.setFont();
+        display.setTextSize(1);
+        display.setCursor(cellX + 6, cellY + 44);
+        display.print(l2);
+      } else {
+        display.setFont(&FreeSansBold9pt7b);
+        display.setTextSize(1);
+        int textX = cellX + 4; 
+        int textY = cellY + 45; 
+        display.setCursor(textX, textY);
+        if (lbl.length() > 6) lbl = lbl.substring(0, 5) + ".";
+        display.print(lbl);
+      }
       
       if (isActive) {
         int sx = cellX + 46; 
@@ -785,11 +811,19 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   JsonDocument doc;
   if (deserializeJson(doc, message)) return;
 
+  if (doc.containsKey("in_call")) {
+    inVoiceCall = doc["in_call"].as<bool>();
+  }
   if (doc["labels"].is<JsonArray>()) {
     JsonArray newLabels = doc["labels"].as<JsonArray>();
     for (size_t i = 0; i < 9 && i < newLabels.size(); i++) gridLabels[i] = newLabels[i].as<String>();
     screenMessage = ""; 
-    requestScreenUpdate(true, 50); // New labels -> full refresh to eliminate ghosting
+    bool fast = doc.containsKey("fast") && doc["fast"].as<bool>();
+    if (fast || inVoiceCall) {
+      requestScreenUpdate(false, 50); // Fast partial refresh for dynamic voice call & modifier transitions
+    } else {
+      requestScreenUpdate(true, 50); // New labels -> full refresh to eliminate ghosting
+    }
   }
   if (doc.containsKey("popup")) {
     screenMessage = doc["popup"].as<String>();
@@ -1457,8 +1491,14 @@ void loop() {
       lastEnc1SendTime = now;
       if (isAudioModifierHeld) {
         isAudioModifierUsed = true;
-        sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"audio_master_volume\", \"id\":1, \"delta\":" + String(sendVal) + "}");
-        addDeviceLog("INP", "AUDIO", ("Master Vol: " + String(sendVal)).c_str());
+        int heldUser = getHeld3x3UserKey();
+        if (heldUser > 0 && inVoiceCall) {
+          sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"discord_user_volume\", \"user_index\":" + String(heldUser) + ", \"delta\":" + String(sendVal) + "}");
+          addDeviceLog("INP", "CALL", ("User #" + String(heldUser) + " Vol: " + String(sendVal)).c_str());
+        } else {
+          sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"audio_master_volume\", \"id\":1, \"delta\":" + String(sendVal) + "}");
+          addDeviceLog("INP", "AUDIO", ("Master Vol: " + String(sendVal)).c_str());
+        }
       } else {
         sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"encoder_scroll\", \"id\":1, \"delta\":" + String(sendVal) + ", \"modifier\":" + (isModifierHeld ? "true" : "false") + "}");
       }
@@ -1509,8 +1549,14 @@ void loop() {
           int delta = (e2Dt == HIGH) ? 1 : -1;
           if (isAudioModifierHeld) {
             isAudioModifierUsed = true;
-            sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"audio_discord_volume\", \"id\":2, \"delta\":" + String(delta) + "}");
-            addDeviceLog("INP", "AUDIO", ("Discord Vol: " + String(delta)).c_str());
+            int heldUser = getHeld3x3UserKey();
+            if (heldUser > 0 && inVoiceCall) {
+              sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"discord_user_volume\", \"user_index\":" + String(heldUser) + ", \"delta\":" + String(delta) + "}");
+              addDeviceLog("INP", "CALL", ("User #" + String(heldUser) + " Vol: " + String(delta)).c_str());
+            } else {
+              sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"audio_discord_volume\", \"id\":2, \"delta\":" + String(delta) + "}");
+              addDeviceLog("INP", "AUDIO", ("Discord Vol: " + String(delta)).c_str());
+            }
           } else {
             sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"encoder_scroll\", \"id\":2, \"delta\":" + String(delta) + ", \"modifier\":" + (isModifierHeld ? "true" : "false") + "}");
           }
@@ -1536,8 +1582,14 @@ void loop() {
           int delta = (e3Dt == HIGH) ? 1 : -1;
           if (isAudioModifierHeld) {
             isAudioModifierUsed = true;
-            sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"audio_app_volume\", \"id\":3, \"delta\":" + String(delta) + "}");
-            addDeviceLog("INP", "AUDIO", ("App Vol: " + String(delta)).c_str());
+            int heldUser = getHeld3x3UserKey();
+            if (heldUser > 0 && inVoiceCall) {
+              sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"discord_user_volume\", \"user_index\":" + String(heldUser) + ", \"delta\":" + String(delta) + "}");
+              addDeviceLog("INP", "CALL", ("User #" + String(heldUser) + " Vol: " + String(delta)).c_str());
+            } else {
+              sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"audio_app_volume\", \"id\":3, \"delta\":" + String(delta) + "}");
+              addDeviceLog("INP", "AUDIO", ("App Vol: " + String(delta)).c_str());
+            }
           } else {
             sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"encoder_scroll\", \"id\":3, \"delta\":" + String(delta) + ", \"modifier\":" + (isModifierHeld ? "true" : "false") + "}");
           }
@@ -1591,7 +1643,7 @@ void loop() {
   if ((intLow || isPollingMatrix || periodicSweep) && scanDue) {
     lastMatrixScan = now;
 
-    bool currentScanState[17] = {false};
+    memset(currentScanState, 0, sizeof(currentScanState));
     int totalActiveKeys = 0;
     
     for (int row = 0; row < 4; row++) {
@@ -1626,22 +1678,38 @@ void loop() {
               // 3x3 Dynamic Matrix Keys (Mirrors E-Ink Screen)
               else if (id != 5 && id != 13) {
                 if (isAudioModifierHeld) {
-                  if (id == 7) {
-                    isAudioModifierUsed = true;
-                    sendPayload("{\"device\":\"macropad\", \"action\":\"audio_device_select\", \"target\":\"headphones\"}");
-                    addDeviceLog("INP", "AUDIO", "Output -> Logitech G321");
-                    setKeyLED(7, strip.Color(0, 240, 255), 400); // Bright cyan confirmation
-                    screenMessage = "AUDIO:\nHEADPHONES";
-                    screenMessageDismissTime = millis() + 2000;
-                    requestScreenUpdate(false, 100);
-                  } else if (id == 8) {
-                    isAudioModifierUsed = true;
-                    sendPayload("{\"device\":\"macropad\", \"action\":\"audio_device_select\", \"target\":\"speakers\"}");
-                    addDeviceLog("INP", "AUDIO", "Output -> Edifier Speakers");
-                    setKeyLED(8, strip.Color(255, 180, 0), 400); // Bright amber confirmation
-                    screenMessage = "AUDIO:\nEDIFIER SPK";
-                    screenMessageDismissTime = millis() + 2000;
-                    requestScreenUpdate(false, 100);
+                  isAudioModifierUsed = true;
+                  if (inVoiceCall) {
+                    if (id == 15) { // Key 15 = Cell 8 = Page Down / PREV
+                      sendPayload("{\"device\":\"macropad\", \"action\":\"discord_page_down\"}");
+                      setKeyLED(15, strip.Color(0, 200, 255), 150);
+                      addDeviceLog("INP", "CALL", "Page Prev");
+                    } else if (id == 16) { // Key 16 = Cell 9 = Page Up / NEXT
+                      sendPayload("{\"device\":\"macropad\", \"action\":\"discord_page_up\"}");
+                      setKeyLED(16, strip.Color(0, 200, 255), 150);
+                      addDeviceLog("INP", "CALL", "Page Next");
+                    } else {
+                      int dynIdx = getDynamicIndex(id);
+                      if (dynIdx > 0) {
+                        setKeyLED(id, strip.Color(0, 255, 120), 200); // Greenish touch feedback for held user
+                      }
+                    }
+                  } else {
+                    if (id == 7) {
+                      sendPayload("{\"device\":\"macropad\", \"action\":\"audio_device_select\", \"target\":\"headphones\"}");
+                      addDeviceLog("INP", "AUDIO", "Output -> Logitech G321");
+                      setKeyLED(7, strip.Color(0, 240, 255), 400); // Bright cyan confirmation
+                      screenMessage = "AUDIO:\nHEADPHONES";
+                      screenMessageDismissTime = millis() + 2000;
+                      requestScreenUpdate(false, 100);
+                    } else if (id == 8) {
+                      sendPayload("{\"device\":\"macropad\", \"action\":\"audio_device_select\", \"target\":\"speakers\"}");
+                      addDeviceLog("INP", "AUDIO", "Output -> Edifier Speakers");
+                      setKeyLED(8, strip.Color(255, 180, 0), 400); // Bright amber confirmation
+                      screenMessage = "AUDIO:\nEDIFIER SPK";
+                      screenMessageDismissTime = millis() + 2000;
+                      requestScreenUpdate(false, 100);
+                    }
                   }
                 } else {
                   int dynIdx = getDynamicIndex(id);
@@ -1748,10 +1816,13 @@ void loop() {
         key13Held = true;
         isAudioModifierHeld = true;
         addDeviceLog("INP", "MOD2", "Audio Modifier held active");
+        sendPayload("{\"device\":\"macropad\", \"action\":\"audio_modifier\", \"active\":true}");
         int px = keyToLedMap[13];
         strip.setPixelColor(px, strip.Color(180, 0, 255)); // Purple indicates audio modifier active
-        strip.setPixelColor(keyToLedMap[7], strip.Color(0, 100, 200)); // Cyan hint: Logitech G321
-        strip.setPixelColor(keyToLedMap[8], strip.Color(200, 100, 0));  // Amber hint: Edifier Speakers
+        if (!inVoiceCall) {
+          strip.setPixelColor(keyToLedMap[7], strip.Color(0, 100, 200)); // Cyan hint: Logitech G321
+          strip.setPixelColor(keyToLedMap[8], strip.Color(200, 100, 0));  // Amber hint: Edifier Speakers
+        }
         strip.show();
       }
     } else {
@@ -1762,6 +1833,7 @@ void loop() {
         if (key13Held) {
           isAudioModifierHeld = false;
           key13Held = false;
+          sendPayload("{\"device\":\"macropad\", \"action\":\"audio_modifier\", \"active\":false}");
           int px = keyToLedMap[13];
           strip.setPixelColor(px, isMicMuted ? strip.Color(255, 0, 0) : strip.Color(0, 0, 0));
           strip.setPixelColor(keyToLedMap[7], strip.Color(0, 0, 0));
@@ -1769,8 +1841,8 @@ void loop() {
           strip.show();
         }
 
-        // If released without using modifier (short tap OR held without turning encoder/keys):
-        if (!wasHeldAsMod || !isAudioModifierUsed) {
+        // Only short tap (< HOLD_MODIFIER_MS) triggers mic mute toggle
+        if (!wasHeldAsMod) {
           sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"mic_mute_toggle\"}");
           addDeviceLog("INP", "MIC", "Toggled Mic Mute (request sent to PC)");
           setKeyLED(13, strip.Color(255, 180, 0), 120); // Amber touch feedback while waiting for PC sync
