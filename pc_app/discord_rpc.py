@@ -141,7 +141,7 @@ class DiscordVoiceRPC:
             res = k32.ReadFile(self.handle, chunk, length - total, ctypes.byref(read_bytes), None)
             if not res or read_bytes.value == 0:
                 break
-            data.raw = data.raw[:total] + chunk.raw[:read_bytes.value]
+            data.raw = data.raw[:total] + chunk.raw[:read_bytes.value] + data.raw[total + read_bytes.value:]
             total += read_bytes.value
         try:
             return op, json.loads(data.raw[:length].decode("utf-8"))
@@ -261,9 +261,19 @@ class DiscordVoiceRPC:
     def _listen_loop(self):
         while self._running and self.is_connected:
             try:
+                # Non-blocking poll via PeekNamedPipe to prevent synchronous ReadFile from blocking WriteFile
+                avail = wintypes.DWORD()
+                if not k32.PeekNamedPipe(self.handle, None, 0, None, ctypes.byref(avail), None):
+                    logger.debug("Discord IPC pipe disconnected")
+                    break
+
+                if avail.value < 8:
+                    time.sleep(0.02)
+                    continue
+
                 opcode, msg = self._read_raw()
                 if opcode is None or msg is None:
-                    break
+                    continue
 
                 # Dispatch voice settings update events
                 if msg.get("cmd") == "DISPATCH" and msg.get("evt") == "VOICE_SETTINGS_UPDATE":
@@ -288,7 +298,7 @@ class DiscordVoiceRPC:
             except Exception as e:
                 if self._running:
                     logger.debug(f"IPC read error: {e}")
-                break
+                time.sleep(0.05)
 
     def close(self):
         self._running = False
