@@ -817,7 +817,9 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   if (doc["labels"].is<JsonArray>()) {
     JsonArray newLabels = doc["labels"].as<JsonArray>();
     for (size_t i = 0; i < 9 && i < newLabels.size(); i++) gridLabels[i] = newLabels[i].as<String>();
-    screenMessage = ""; 
+    if (millis() >= screenMessageDismissTime) {
+      screenMessage = ""; 
+    }
     bool fast = doc.containsKey("fast") && doc["fast"].as<bool>();
     if (fast || inVoiceCall) {
       requestScreenUpdate(false, 50); // Fast partial refresh for dynamic voice call & modifier transitions
@@ -1677,44 +1679,47 @@ void loop() {
               
               // 3x3 Dynamic Matrix Keys (Mirrors E-Ink Screen)
               else if (id != 5 && id != 13) {
-                if (isAudioModifierHeld) {
+                bool audioModActive = isAudioModifierHeld || currentScanState[13] || key13PhysicallyPressed;
+                if (audioModActive) {
+                  isAudioModifierHeld = true;
+                  key13Held = true;
                   isAudioModifierUsed = true;
-                  if (inVoiceCall) {
-                    if (id == 15) { // Key 15 = Cell 8 = Page Down / PREV
-                      sendPayload("{\"device\":\"macropad\", \"action\":\"discord_page_down\"}");
-                      setKeyLED(15, strip.Color(0, 200, 255), 150);
-                      addDeviceLog("INP", "CALL", "Page Prev");
-                    } else if (id == 16) { // Key 16 = Cell 9 = Page Up / NEXT
-                      sendPayload("{\"device\":\"macropad\", \"action\":\"discord_page_up\"}");
-                      setKeyLED(16, strip.Color(0, 200, 255), 150);
-                      addDeviceLog("INP", "CALL", "Page Next");
-                    } else {
-                      int dynIdx = getDynamicIndex(id);
-                      if (dynIdx > 0) {
-                        setKeyLED(id, strip.Color(0, 255, 120), 200); // Greenish touch feedback for held user
-                      }
-                    }
+
+                  if (id == 7) {
+                    sendPayload("{\"device\":\"macropad\", \"action\":\"audio_device_select\", \"target\":\"headphones\"}");
+                    addDeviceLog("INP", "AUDIO", "Output -> Logitech G321");
+                    setKeyLED(7, strip.Color(0, 240, 255), 400); // Bright cyan confirmation
+                    screenMessage = "AUDIO:\nHEADPHONES";
+                    screenMessageDismissTime = millis() + 2000;
+                    requestScreenUpdate(false, 50);
+                  } else if (id == 8 || id == 10) {
+                    sendPayload("{\"device\":\"macropad\", \"action\":\"audio_device_select\", \"target\":\"speakers\"}");
+                    addDeviceLog("INP", "AUDIO", "Output -> Edifier Speakers");
+                    setKeyLED(id, strip.Color(255, 180, 0), 400); // Bright amber confirmation
+                    screenMessage = "AUDIO:\nEDIFIER SPK";
+                    screenMessageDismissTime = millis() + 2000;
+                    requestScreenUpdate(false, 50);
+                  } else if (inVoiceCall && id == 15) { // Key 15 = Cell 8 = Page Down / PREV
+                    sendPayload("{\"device\":\"macropad\", \"action\":\"discord_page_down\"}");
+                    setKeyLED(15, strip.Color(0, 200, 255), 150);
+                    addDeviceLog("INP", "CALL", "Page Prev");
+                  } else if (inVoiceCall && id == 16) { // Key 16 = Cell 9 = Page Up / NEXT
+                    sendPayload("{\"device\":\"macropad\", \"action\":\"discord_page_up\"}");
+                    setKeyLED(16, strip.Color(0, 200, 255), 150);
+                    addDeviceLog("INP", "CALL", "Page Next");
                   } else {
-                    if (id == 7) {
-                      sendPayload("{\"device\":\"macropad\", \"action\":\"audio_device_select\", \"target\":\"headphones\"}");
-                      addDeviceLog("INP", "AUDIO", "Output -> Logitech G321");
-                      setKeyLED(7, strip.Color(0, 240, 255), 400); // Bright cyan confirmation
-                      screenMessage = "AUDIO:\nHEADPHONES";
-                      screenMessageDismissTime = millis() + 2000;
-                      requestScreenUpdate(false, 100);
-                    } else if (id == 8) {
-                      sendPayload("{\"device\":\"macropad\", \"action\":\"audio_device_select\", \"target\":\"speakers\"}");
-                      addDeviceLog("INP", "AUDIO", "Output -> Edifier Speakers");
-                      setKeyLED(8, strip.Color(255, 180, 0), 400); // Bright amber confirmation
-                      screenMessage = "AUDIO:\nEDIFIER SPK";
-                      screenMessageDismissTime = millis() + 2000;
-                      requestScreenUpdate(false, 100);
+                    int dynIdx = getDynamicIndex(id);
+                    if (dynIdx > 0) {
+                      setKeyLED(id, strip.Color(0, 255, 120), 200); // Greenish touch feedback for held user
                     }
                   }
                 } else {
                   int dynIdx = getDynamicIndex(id);
                   if (dynIdx > 0) {
-                    if (isModifierHeld) {
+                    bool modActive = isModifierHeld || currentScanState[5] || key5PhysicallyPressed;
+                    if (modActive) {
+                      isModifierHeld = true;
+                      key5Held = true;
                       dynKeyPressTime[dynIdx] = now;
                       dynKeyHeld[dynIdx] = false;
                       setKeyLED(id, strip.Color(0, 150, 255), 100); // Visual touch feedback (blue)
@@ -1819,10 +1824,8 @@ void loop() {
         sendPayload("{\"device\":\"macropad\", \"action\":\"audio_modifier\", \"active\":true}");
         int px = keyToLedMap[13];
         strip.setPixelColor(px, strip.Color(180, 0, 255)); // Purple indicates audio modifier active
-        if (!inVoiceCall) {
-          strip.setPixelColor(keyToLedMap[7], strip.Color(0, 100, 200)); // Cyan hint: Logitech G321
-          strip.setPixelColor(keyToLedMap[8], strip.Color(200, 100, 0));  // Amber hint: Edifier Speakers
-        }
+        strip.setPixelColor(keyToLedMap[7], strip.Color(0, 100, 200)); // Cyan hint: Logitech G321
+        strip.setPixelColor(keyToLedMap[8], strip.Color(200, 100, 0));  // Amber hint: Edifier Speakers
         strip.show();
       }
     } else {
@@ -1838,6 +1841,7 @@ void loop() {
           strip.setPixelColor(px, isMicMuted ? strip.Color(255, 0, 0) : strip.Color(0, 0, 0));
           strip.setPixelColor(keyToLedMap[7], strip.Color(0, 0, 0));
           strip.setPixelColor(keyToLedMap[8], strip.Color(0, 0, 0));
+          strip.setPixelColor(keyToLedMap[10], strip.Color(0, 0, 0));
           strip.show();
         }
 

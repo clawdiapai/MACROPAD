@@ -463,6 +463,17 @@ def switch_default_playback_device(target: str) -> Optional[str]:
         logger.warning("PolicyConfig COM interface is not available")
         return None
 
+    if target == "toggle":
+        try:
+            spk = AudioUtilities.GetSpeakers()
+            curr_name = getattr(spk, 'FriendlyName', '')
+            if "g321" in curr_name.lower():
+                target = "speakers"
+            else:
+                target = "headphones"
+        except Exception:
+            target = "headphones"
+
     keyword = "G321" if target == "headphones" else "EDIFIER"
     label = "Logitech G321" if target == "headphones" else "Edifier Speakers"
     
