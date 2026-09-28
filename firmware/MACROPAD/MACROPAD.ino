@@ -223,6 +223,7 @@ String screenMessage = "BOOTING...";
 String gridLabels[9] = {"ACT 1", "ACT 2", "ACT 3", "ACT 4", "ACT 5", "ACT 6", "ACT 7", "ACT 8", "ACT 9"};
 bool isHudActive = false;
 unsigned long hudAutoDismissTime = 0;
+bool isScreenBlackTestActive = false;
 
 void requestScreenUpdate(bool fullRefresh = false, unsigned long delayMs = 300) {
   if (fullRefresh) fullRefreshNeeded = true;
@@ -663,33 +664,37 @@ void toggleHud() {
 }
 
 void updateScreen() {
-  display.fillScreen(GxEPD_WHITE);
-  if (isHudActive) {
-    drawHud();
+  if (isScreenBlackTestActive) {
+    display.fillScreen(GxEPD_BLACK);
   } else {
-    drawTopBar();
-    drawGrid();
-
-  if (screenMessage != "") {
-    display.fillRect(10, 68, 180, 62, GxEPD_WHITE);
-    display.drawRect(10, 68, 180, 62, GxEPD_BLACK);
-    display.setFont(&FreeSansBold9pt7b);
-    display.setTextColor(GxEPD_BLACK);
-    int newlineIdx = screenMessage.indexOf('\n');
-    if (newlineIdx >= 0) {
-      String line1 = screenMessage.substring(0, newlineIdx);
-      String line2 = screenMessage.substring(newlineIdx + 1);
-      display.setCursor(20, 93);
-      display.print(line1);
-      display.setCursor(20, 118);
-      display.print(line2);
+    display.fillScreen(GxEPD_WHITE);
+    if (isHudActive) {
+      drawHud();
     } else {
-      int cursorX = (screenMessage.length() < 10) ? 40 : 25;
-      display.setCursor(cursorX, 105);
-      display.print(screenMessage);
+      drawTopBar();
+      drawGrid();
+
+      if (screenMessage != "") {
+        display.fillRect(10, 68, 180, 62, GxEPD_WHITE);
+        display.drawRect(10, 68, 180, 62, GxEPD_BLACK);
+        display.setFont(&FreeSansBold9pt7b);
+        display.setTextColor(GxEPD_BLACK);
+        int newlineIdx = screenMessage.indexOf('\n');
+        if (newlineIdx >= 0) {
+          String line1 = screenMessage.substring(0, newlineIdx);
+          String line2 = screenMessage.substring(newlineIdx + 1);
+          display.setCursor(20, 93);
+          display.print(line1);
+          display.setCursor(20, 118);
+          display.print(line2);
+        } else {
+          int cursorX = (screenMessage.length() < 10) ? 40 : 25;
+          display.setCursor(cursorX, 105);
+          display.print(screenMessage);
+        }
+      }
     }
   }
-}
   display.display(!fullRefreshNeeded);
   fullRefreshNeeded = false;
 
@@ -1154,6 +1159,10 @@ void updateLayerLEDs(bool doShow) {
 }
 
 void selectLayerSlot(int slot) {
+  if (isScreenBlackTestActive) {
+    isScreenBlackTestActive = false;
+    fullRefreshNeeded = true;
+  }
   currentSlot = slot;
   currentLayer = (currentBank * 4) + currentSlot + 1;
   rtcBank = currentBank;
@@ -1168,6 +1177,10 @@ void selectLayerSlot(int slot) {
 }
 
 void cycleBank() {
+  if (isScreenBlackTestActive) {
+    isScreenBlackTestActive = false;
+    fullRefreshNeeded = true;
+  }
   currentBank = (currentBank + 1) % MAX_BANKS;
   currentLayer = (currentBank * 4) + currentSlot + 1;
   rtcBank = currentBank;
@@ -1182,6 +1195,10 @@ void cycleBank() {
 }
 
 void resetToB1L1() {
+  if (isScreenBlackTestActive) {
+    isScreenBlackTestActive = false;
+    fullRefreshNeeded = true;
+  }
   currentBank = 0;
   currentSlot = 0;
   currentLayer = 1;
@@ -1724,15 +1741,27 @@ void loop() {
                       dynKeyHeld[dynIdx] = false;
                       setKeyLED(id, strip.Color(0, 150, 255), 100); // Visual touch feedback (blue)
                     } else {
-                      if (screenMessage != "") {
-                        screenMessage = ""; 
-                        screenMessageDismissTime = 0;
-                        requestScreenUpdate(false, 300);
+                      if (currentLayer == 1 && dynIdx == 1) {
+                        isScreenBlackTestActive = !isScreenBlackTestActive;
+                        requestScreenUpdate(true, 50);
+                        addDeviceLog("DISP", "TEST", isScreenBlackTestActive ? "Screen Alignment: SOLID BLACK" : "Screen Alignment: NORMAL");
+                        setKeyLED(id, isScreenBlackTestActive ? strip.Color(255, 0, 255) : strip.Color(0, 255, 0), 400);
+                        sendPayload("{\"device\":\"macropad\", \"layer\":1, \"action\":\"macro\", \"index\":1, \"label\":\"ACT 1\", \"black_test\":" + String(isScreenBlackTestActive ? "true" : "false") + "}");
+                      } else {
+                        if (isScreenBlackTestActive) {
+                          isScreenBlackTestActive = false;
+                          requestScreenUpdate(true, 50);
+                        }
+                        if (screenMessage != "") {
+                          screenMessage = ""; 
+                          screenMessageDismissTime = 0;
+                          requestScreenUpdate(false, 300);
+                        }
+                        String lbl = gridLabels[dynIdx - 1];
+                        sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"macro\", \"index\":" + String(dynIdx) + ", \"label\":\"" + lbl + "\"}");
+                        addDeviceLog("INP", "MACRO", ("Key #" + String(dynIdx) + " (" + lbl + ")").c_str());
+                        setKeyLED(id, strip.Color(0, 255, 0), 100);
                       }
-                      String lbl = gridLabels[dynIdx - 1];
-                      sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"macro\", \"index\":" + String(dynIdx) + ", \"label\":\"" + lbl + "\"}");
-                      addDeviceLog("INP", "MACRO", ("Key #" + String(dynIdx) + " (" + lbl + ")").c_str());
-                      setKeyLED(id, strip.Color(0, 255, 0), 100);
                     }
                   }
                 }
