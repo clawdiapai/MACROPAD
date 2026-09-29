@@ -1346,9 +1346,10 @@ void setup() {
 
   SPI.begin(EPD_SCL, -1, EPD_SDA, EPD_CS);
   display.init(115200, true, 2, false); 
-  display.setRotation(2); 
+  display.setRotation(0); 
   display.setTextColor(GxEPD_BLACK);
   pinMode(EPD_BUSY, INPUT);
+  requestScreenUpdate(true, 100);
 
   setupNetwork(); 
 
