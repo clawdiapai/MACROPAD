@@ -1,5 +1,6 @@
 # Loads default set of integrations. Do not remove.
 default_config:
+wake_on_lan:
 
 # Load frontend themes from the themes folder
 frontend:

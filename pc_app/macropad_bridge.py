@@ -2,6 +2,7 @@ import ctypes
 import json
 import logging
 import os
+import socket
 import time
 from typing import Optional, List
 import threading
@@ -192,7 +193,7 @@ is_synthetic_send = False
 is_audio_mod_active = False
 voice_page = 0
 active_voice_members = []
-normal_grid_labels = ["ACT 1", "ACT 2", "ACT 3", "ACT 4", "ACT 5", "ACT 6", "ACT 7", "ACT 8", "ACT 9"]
+normal_grid_labels = ["ACT 1", "ACT 2", "ACT 3", "ACT 4", "ACT 5", "ACT 6", "ACT 7", "ACT 8", "WOL PC"]
 
 def build_voice_labels(members: list, page: int):
     """Formats voice call members into 3x3 matrix labels with pagination"""
@@ -495,7 +496,22 @@ def switch_default_playback_device(target: str) -> Optional[str]:
         return None
     except Exception as e:
         logger.error(f"Error switching audio device: {e}")
-        return None
+def send_wake_on_lan(mac_address: str = "d4:93:90:3b:f0:89"):
+    """Broadcasts Wake-on-LAN magic packet over UDP to wake target machine"""
+    try:
+        clean_mac = mac_address.replace(":", "").replace("-", "")
+        if len(clean_mac) != 12:
+            logger.error(f"Invalid MAC address for WoL: {mac_address}")
+            return
+        data = bytes.fromhex("FFFFFFFFFFFF" + (clean_mac * 16))
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            s.sendto(data, ("255.255.255.255", 9))
+            s.sendto(data, ("192.168.1.255", 9))
+        logger.info(f">>> Sent Wake-on-LAN magic packet to {mac_address}")
+        publish_popup("WOL SENT:\nPC WAKE")
+    except Exception as e:
+        logger.error(f"Failed to send Wake-on-LAN packet: {e}")
 
 # ==============================================================================
 # MQTT HANDLERS
@@ -634,6 +650,11 @@ def on_message(client, userdata, msg):
 
         elif action == "preset_save":
             logger.info(f">>> Modifier + Preset Save: Preset {payload.get('index')}")
+
+        elif action == "wakeonlan" or (action == "macro" and payload.get("index") == 9 and payload.get("layer") == 1):
+            mac = payload.get("mac", "d4:93:90:3b:f0:89")
+            logger.info(f">>> Layer 1 ACT 9 triggered: Wake-on-LAN for {mac}")
+            send_wake_on_lan(mac)
 
     except Exception as e:
         logger.error(f"Error handling message: {e}")

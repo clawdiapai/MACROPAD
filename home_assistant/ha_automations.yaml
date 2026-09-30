@@ -471,3 +471,24 @@
             payload: >
               {"popup": "PRESET {{ trigger.payload_json.index }}\nEMPTY"}
   mode: restart
+
+- id: "macropad_wol_pc"
+  alias: "MacroPad - Wake on LAN PC"
+  description: "Sends Wake on LAN magic packet when Layer 1 ACT 9 is pressed on MacroPad"
+  trigger:
+    - platform: mqtt
+      topic: macropad/input
+  condition:
+    - condition: template
+      value_template: >
+        {{ trigger.payload_json is defined and
+           (trigger.payload_json.action == 'wakeonlan' or
+            (trigger.payload_json.action == 'macro' and 
+             trigger.payload_json.layer == 1 and 
+             trigger.payload_json.index == 9)) }}
+  action:
+    - action: wake_on_lan.send_magic_packet
+      data:
+        mac: "d4:93:90:3b:f0:89"
+        broadcast_address: "192.168.1.255"
+

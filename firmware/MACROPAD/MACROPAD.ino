@@ -1,6 +1,7 @@
 #include <Wire.h>
 #include <Adafruit_NeoPixel.h>
 #include <WiFi.h>
+#include <WiFiUdp.h>
 #include <PubSubClient.h>
 #include <SPI.h>
 #include <GxEPD2_BW.h>
@@ -220,7 +221,7 @@ bool fullRefreshNeeded = true;
 bool screenNeedsUpdate = true;
 unsigned long screenUpdateScheduledTime = 0;
 String screenMessage = "BOOTING...";
-String gridLabels[9] = {"ACT 1", "ACT 2", "ACT 3", "ACT 4", "ACT 5", "ACT 6", "ACT 7", "ACT 8", "ACT 9"};
+String gridLabels[9] = {"ACT 1", "ACT 2", "ACT 3", "ACT 4", "ACT 5", "ACT 6", "ACT 7", "ACT 8", "WOL PC"};
 bool isHudActive = false;
 unsigned long hudAutoDismissTime = 0;
 bool isScreenBlackTestActive = false;
@@ -1117,6 +1118,36 @@ void flushMqttQueue() {
   }
 }
 
+WiFiUDP wolUdp;
+
+void sendWakeOnLan(const char* macStr) {
+  unsigned int parsed[6];
+  if (sscanf(macStr, "%x:%x:%x:%x:%x:%x", &parsed[0], &parsed[1], &parsed[2], &parsed[3], &parsed[4], &parsed[5]) != 6 &&
+      sscanf(macStr, "%x-%x-%x-%x-%x-%x", &parsed[0], &parsed[1], &parsed[2], &parsed[3], &parsed[4], &parsed[5]) != 6) {
+    return;
+  }
+  byte mac[6];
+  for (int i = 0; i < 6; i++) mac[i] = (byte)parsed[i];
+
+  byte magicPacket[102];
+  memset(magicPacket, 0xFF, 6);
+  for (int i = 0; i < 16; i++) {
+    memcpy(&magicPacket[6 + (i * 6)], mac, 6);
+  }
+
+  IPAddress broadcastIp(255, 255, 255, 255);
+  wolUdp.beginPacket(broadcastIp, 9);
+  wolUdp.write(magicPacket, sizeof(magicPacket));
+  wolUdp.endPacket();
+
+  if (WiFi.status() == WL_CONNECTED) {
+    IPAddress subnetBroadcast = WiFi.broadcastIP();
+    wolUdp.beginPacket(subnetBroadcast, 9);
+    wolUdp.write(magicPacket, sizeof(magicPacket));
+    wolUdp.endPacket();
+  }
+}
+
 void sendPayload(String payload) {
   if (mqttClient.connected()) {
     mqttClient.publish(mqtt_topic_pub, payload.c_str());
@@ -1168,6 +1199,11 @@ void selectLayerSlot(int slot) {
   rtcBank = currentBank;
   rtcSlot = currentSlot;
   rtcLayer = currentLayer;
+  if (currentLayer == 1) {
+    gridLabels[8] = "WOL PC";
+  } else {
+    gridLabels[8] = "ACT 9";
+  }
   updateLayerLEDs(true);
   screenMessage = "LAYER " + String(currentLayer);
   screenMessageDismissTime = millis() + POPUP_TIMEOUT_MS;
@@ -1186,6 +1222,11 @@ void cycleBank() {
   rtcBank = currentBank;
   rtcSlot = currentSlot;
   rtcLayer = currentLayer;
+  if (currentLayer == 1) {
+    gridLabels[8] = "WOL PC";
+  } else {
+    gridLabels[8] = "ACT 9";
+  }
   updateLayerLEDs(true);
   screenMessage = "BANK " + String(currentBank + 1) + " L" + String(currentLayer);
   screenMessageDismissTime = millis() + POPUP_TIMEOUT_MS;
@@ -1202,6 +1243,7 @@ void resetToB1L1() {
   currentBank = 0;
   currentSlot = 0;
   currentLayer = 1;
+  gridLabels[8] = "WOL PC";
   rtcBank = 0;
   rtcSlot = 0;
   rtcLayer = 1;
@@ -1748,6 +1790,14 @@ void loop() {
                         addDeviceLog("DISP", "TEST", isScreenBlackTestActive ? "Screen Alignment: SOLID BLACK" : "Screen Alignment: NORMAL");
                         setKeyLED(id, isScreenBlackTestActive ? strip.Color(255, 0, 255) : strip.Color(0, 255, 0), 400);
                         sendPayload("{\"device\":\"macropad\", \"layer\":1, \"action\":\"macro\", \"index\":1, \"label\":\"ACT 1\", \"black_test\":" + String(isScreenBlackTestActive ? "true" : "false") + "}");
+                      } else if (currentLayer == 1 && dynIdx == 9) {
+                        sendWakeOnLan("d4:93:90:3b:f0:89");
+                        screenMessage = "WOL PC:\nSENT MAGIC PKT";
+                        screenMessageDismissTime = millis() + 2500;
+                        requestScreenUpdate(false, 50);
+                        setKeyLED(id, strip.Color(0, 255, 200), 400);
+                        sendPayload("{\"device\":\"macropad\", \"layer\":1, \"action\":\"wakeonlan\", \"index\":9, \"label\":\"WOL PC\", \"mac\":\"d4:93:90:3b:f0:89\"}");
+                        addDeviceLog("INP", "WOL", "Sent Wake-on-LAN to d4:93:90:3b:f0:89");
                       } else {
                         if (isScreenBlackTestActive) {
                           isScreenBlackTestActive = false;
