@@ -153,6 +153,11 @@ python macropad_bridge.py
 # Or double-click start_audio_bridge.bat
 ```
 
+#### Run on Windows Startup:
+To run automatically in the background on system boot:
+- Run [install_startup.bat](file:///C:/Users/Uzzo/Desktop/MACROPAD/pc_app/install_startup.bat) (uses `pythonw.exe` for silent background execution).
+- To disable: Run [uninstall_startup.bat](file:///C:/Users/Uzzo/Desktop/MACROPAD/pc_app/uninstall_startup.bat).
+
 ---
 
 ### 3. Raspberry Pi Web Dashboard (`pi_app`)

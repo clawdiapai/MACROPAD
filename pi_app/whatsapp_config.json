@@ -1,0 +1,35 @@
+{
+  "vip_contacts": [
+    {
+      "name": "Mom",
+      "phone": "",
+      "aliases": ["mom", "mamma", "mother"]
+    },
+    {
+      "name": "Dad",
+      "phone": "",
+      "aliases": ["dad", "papa", "father"]
+    },
+    {
+      "name": "Sister",
+      "phone": "",
+      "aliases": ["sister", "sis"]
+    }
+  ],
+  "trigger_keywords": [
+    "!call",
+    "!urgent",
+    "!alert",
+    "!ring",
+    "call",
+    "urgent",
+    "🚨",
+    "📞",
+    "ring"
+  ],
+  "any_vip_message_triggers": false,
+  "incoming_call_triggers": true,
+  "send_ack_reaction": false,
+  "ack_reaction_emoji": "✅",
+  "dashboard_notify_url": "http://127.0.0.1:5000/api/notify"
+}

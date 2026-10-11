@@ -3,11 +3,22 @@ import json
 import logging
 import os
 import socket
+import sys
+import subprocess
 import time
+import webbrowser
 from typing import Optional, List
 import threading
 import paho.mqtt.client as mqtt
 from pynput import keyboard
+
+# SYSTEM TRAY CONTROLLER (PYSTRAY)
+try:
+    import pystray
+    from PIL import Image, ImageDraw
+    TRAY_AVAILABLE = True
+except Exception as e:
+    TRAY_AVAILABLE = False
 
 try:
     from dotenv import load_dotenv, find_dotenv
@@ -184,6 +195,17 @@ def publish_mic_state(is_muted: bool):
         payload = {"mic_muted": is_muted}
         mqtt_client.publish(TOPIC_DISPLAY, json.dumps(payload), retain=True)
 
+def publish_voice_call_state(in_call: Optional[bool] = None):
+    global mqtt_client, discord_rpc_client
+    if not mqtt_client or not mqtt_client.is_connected():
+        return
+    if in_call is None:
+        in_call = False
+        if discord_rpc_client and discord_rpc_client.is_authenticated and discord_rpc_client.voice_channel:
+            in_call = bool(discord_rpc_client.voice_channel.get("id"))
+    payload = {"in_call": bool(in_call)}
+    mqtt_client.publish(TOPIC_DISPLAY, json.dumps(payload), retain=True)
+
 is_discord_muted = False
 is_synthetic_send = False
 
@@ -264,7 +286,9 @@ def on_voice_channel_update(voice_channel):
     """Callback fired when voice call membership or status changes"""
     global is_audio_mod_active
     ch_name = voice_channel.get('name') if voice_channel else 'No call'
-    logger.info(f"[Discord Voice Event] Channel update: {ch_name}")
+    in_call = bool(voice_channel and voice_channel.get("id"))
+    logger.info(f"[Discord Voice Event] Channel update: {ch_name} (in_call={in_call})")
+    publish_voice_call_state(in_call)
     if is_audio_mod_active:
         publish_voice_grid()
 
@@ -274,8 +298,8 @@ def on_discord_rpc_mute_change(is_muted: bool):
     is_discord_muted = is_muted
     status_str = "MIC MUTED" if is_discord_muted else "MIC LIVE"
     logger.info(f"[Discord RPC Event] Live Mute State: {status_str}")
-    publish_popup(status_str)
     publish_mic_state(is_discord_muted)
+    update_tray_icon()
 
 def on_keyboard_hotkey():
     global is_synthetic_send, is_discord_muted, discord_rpc_client
@@ -287,8 +311,8 @@ def on_keyboard_hotkey():
     logger.info("Physical keyboard hotkey [Ctrl+Shift+] detected (Fallback)")
     is_discord_muted = not is_discord_muted
     status_str = "MIC MUTED" if is_discord_muted else "MIC LIVE"
-    publish_popup(status_str)
     publish_mic_state(is_discord_muted)
+    update_tray_icon()
 
 def trigger_discord_mute_hotkey():
     """Simulates pressing Ctrl+Shift+] using hardware scan codes via SendInput"""
@@ -521,8 +545,9 @@ def on_connect(client, userdata, flags, rc, properties=None):
         logger.info(f"Connected to MQTT broker at {MQTT_BROKER}")
         client.subscribe([(TOPIC_INPUT, 0), (TOPIC_STATUS, 0)])
         logger.info(f"Subscribed to topics: {TOPIC_INPUT}, {TOPIC_STATUS}")
-        # Sync current mic status to MacroPad on connect (retained so device gets it whenever it powers on)
+        # Sync current mic status and voice call status to MacroPad on connect (retained so device gets it whenever it powers on)
         publish_mic_state(is_discord_muted)
+        publish_voice_call_state()
     else:
         logger.error(f"MQTT connection failed with code {rc}")
 
@@ -530,8 +555,9 @@ def on_message(client, userdata, msg):
     try:
         # MacroPad status / heartbeat topic (fires when device powers on, reconnects, or wakes up)
         if msg.topic == TOPIC_STATUS:
-            logger.info("MacroPad device presence detected -> syncing mic mute state")
+            logger.info("MacroPad device presence detected -> syncing mic mute and call state")
             publish_mic_state(is_discord_muted)
+            publish_voice_call_state()
             return
 
         payload = json.loads(msg.payload.decode('utf-8'))
@@ -593,11 +619,14 @@ def on_message(client, userdata, msg):
                         if mqtt_client and mqtt_client.is_connected():
                             mqtt_client.publish(TOPIC_DISPLAY, json.dumps({"in_call": False}), retain=True)
             else:
-                # Modifier released -> restore normal layer's grid labels
+                # Modifier released -> restore normal layer's grid labels while preserving voice call status
                 if mqtt_client and mqtt_client.is_connected():
+                    in_call = False
+                    if discord_rpc_client and discord_rpc_client.is_authenticated and discord_rpc_client.voice_channel:
+                        in_call = bool(discord_rpc_client.voice_channel.get("id"))
                     mqtt_client.publish(TOPIC_DISPLAY, json.dumps({
                         "labels": normal_grid_labels,
-                        "in_call": False,
+                        "in_call": in_call,
                         "fast": True
                     }), retain=True)
 
@@ -656,6 +685,31 @@ def on_message(client, userdata, msg):
             logger.info(f">>> Layer 1 ACT 9 triggered: Wake-on-LAN for {mac}")
             send_wake_on_lan(mac)
 
+        # ----------------------------------------------------------------------
+        # 3. LAYER 4 POWER CONTROLS: SHUTDOWN & RESTART TIMERS
+        # ----------------------------------------------------------------------
+        elif action == "shutdown_timer_start":
+            duration = payload.get("duration", 20)
+            logger.warning(f">>> Layer 4 ACT 9: Windows Shutdown timer started ({duration}s)")
+            os.system(f'shutdown /s /t {duration} /c "MacroPad: Shutdown in {duration}s. Tap ACT 9 to cancel."')
+
+        elif action == "restart_timer_start":
+            duration = payload.get("duration", 20)
+            logger.warning(f">>> Layer 4 ACT 9: Windows Restart timer started ({duration}s)")
+            os.system(f'shutdown /r /t {duration} /c "MacroPad: Restart in {duration}s. Tap ACT 9 to cancel."')
+
+        elif action == "power_timer_cancel":
+            logger.info(">>> Layer 4 ACT 9: Windows Power Timer CANCELLED")
+            os.system("shutdown /a")
+
+        elif action == "pc_shutdown":
+            logger.warning(">>> Layer 4 ACT 9: Executing immediate Windows Shutdown...")
+            os.system("shutdown /s /t 0 /f")
+
+        elif action == "pc_restart":
+            logger.warning(">>> Layer 4 ACT 9: Executing immediate Windows Restart...")
+            os.system("shutdown /r /t 0 /f")
+
     except Exception as e:
         logger.error(f"Error handling message: {e}")
 
@@ -689,10 +743,98 @@ def start_discord_rpc():
         time.sleep(10)
 
 # ==============================================================================
+# SYSTEM TRAY ICON (PYSTRAY)
+# ==============================================================================
+tray_icon = None
+
+def create_tray_image(muted: bool = False):
+    """Generates a crisp 32x32 RGBA icon for the Windows system tray."""
+    img = Image.new('RGBA', (32, 32), color=(0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    # Background rounded square
+    bg_color = (25, 28, 36, 255)
+    border_color = (255, 60, 80, 255) if muted else (0, 230, 255, 255)
+    d.rounded_rectangle([(1, 1), (30, 30)], radius=6, fill=bg_color, outline=border_color, width=2)
+    
+    # Status indicator circle
+    dot_color = (255, 60, 80, 255) if muted else (0, 230, 255, 255)
+    d.ellipse([(9, 9), (22, 22)], fill=dot_color)
+    
+    # Inner bright dot
+    inner_dot = (255, 200, 210, 255) if muted else (210, 255, 255, 255)
+    d.ellipse([(13, 13), (18, 18)], fill=inner_dot)
+    return img
+
+def on_tray_open_dashboard(icon, item):
+    webbrowser.open("http://192.168.1.62:5000")
+
+def on_tray_toggle_mute(icon, item):
+    toggle_microphone_mute()
+
+def on_tray_restart(icon, item):
+    logger.info("Restarting MacroPad PC Bridge via Tray Icon...")
+    if icon:
+        try:
+            icon.stop()
+        except Exception:
+            pass
+    if mqtt_client:
+        try:
+            mqtt_client.disconnect()
+        except Exception:
+            pass
+    time.sleep(0.3)
+    # Relaunch the process without console window
+    subprocess.Popen(
+        [sys.executable, os.path.abspath(__file__)],
+        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    )
+    os._exit(0)
+
+def on_tray_exit(icon, item):
+    logger.info("Quitting MacroPad PC Bridge via Tray Icon...")
+    if icon:
+        try:
+            icon.stop()
+        except Exception:
+            pass
+    if mqtt_client:
+        try:
+            mqtt_client.disconnect()
+        except Exception:
+            pass
+    os._exit(0)
+
+def update_tray_icon():
+    global tray_icon
+    if tray_icon and TRAY_AVAILABLE:
+        try:
+            tray_icon.icon = create_tray_image(is_discord_muted)
+            tray_icon.title = f"MacroPad Bridge ({'MUTED' if is_discord_muted else 'LIVE'})"
+        except Exception:
+            pass
+
+def setup_tray_icon():
+    global tray_icon
+    if not TRAY_AVAILABLE:
+        return None
+    menu = pystray.Menu(
+        pystray.MenuItem("⚡ MacroPad Audio Bridge", None, enabled=False),
+        pystray.Menu.SEPARATOR,
+        pystray.MenuItem("🌐 Open Web Dashboard", on_tray_open_dashboard),
+        pystray.MenuItem(lambda text: "🎤 Mic: MUTED (Click to Unmute)" if is_discord_muted else "🎤 Mic: LIVE (Click to Mute)", on_tray_toggle_mute),
+        pystray.Menu.SEPARATOR,
+        pystray.MenuItem("🔄 Restart Bridge", on_tray_restart),
+        pystray.MenuItem("❌ Quit", on_tray_exit)
+    )
+    tray_icon = pystray.Icon("MacroPadBridge", create_tray_image(is_discord_muted), "MacroPad Audio Bridge", menu)
+    return tray_icon
+
+# ==============================================================================
 # MAIN ENTRY POINT
 # ==============================================================================
 def main():
-    global mqtt_client
+    global mqtt_client, tray_icon
     logger.info("==================================================================")
     logger.info("  MacroPad Windows PC Audio & Discord Controller Bridge Live")
     logger.info("==================================================================")
@@ -712,21 +854,36 @@ def main():
     except Exception as e:
         logger.warning(f"Could not start physical keyboard listener: {e}")
 
+    # Launch System Tray Icon detached
+    if TRAY_AVAILABLE:
+        tray_icon = setup_tray_icon()
+        if tray_icon:
+            try:
+                tray_icon.run_detached()
+                logger.info("System Tray Icon active and detached.")
+            except Exception as e:
+                logger.error(f"Failed to start system tray icon: {e}")
+
     mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     mqtt_client.on_connect = on_connect
     mqtt_client.on_message = on_message
 
     logger.info(f"Connecting to MQTT broker at {MQTT_BROKER}:{MQTT_PORT}...")
-    try:
-        mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
-    except Exception as e:
-        logger.error(f"Could not connect to MQTT broker: {e}")
-        return
+    while True:
+        try:
+            mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
+            break
+        except Exception as e:
+            logger.warning(f"Could not connect to MQTT broker ({e}). Retrying in 5 seconds...")
+            time.sleep(5)
 
+    # Keep process alive with MQTT message processing loop
     try:
         mqtt_client.loop_forever()
     except KeyboardInterrupt:
         logger.info("Bridge stopped by user.")
+        if tray_icon:
+            tray_icon.stop()
 
 if __name__ == "__main__":
     main()
