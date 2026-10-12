@@ -223,6 +223,34 @@ def ensure_default_desktop():
     except Exception:
         pass
 
+def _resolve_uwp_child_exe(hwnd) -> str:
+    """Resolves the actual UWP app exe when ApplicationFrameHost owns the foreground window.
+    Finds the 'Windows.UI.Core.CoreWindow' child and queries its owning process."""
+    try:
+        core_hwnd = ctypes.windll.user32.FindWindowExW(hwnd, 0,
+                        "Windows.UI.Core.CoreWindow", None)
+        if not core_hwnd:
+            return ""
+        pid = ctypes.c_ulong(0)
+        ctypes.windll.user32.GetWindowThreadProcessId(core_hwnd, ctypes.byref(pid))
+        if not pid.value:
+            return ""
+        hproc = ctypes.windll.kernel32.OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION, False, pid.value)
+        if not hproc:
+            return ""
+        try:
+            path_buf = ctypes.create_unicode_buffer(512)
+            sz = ctypes.c_ulong(512)
+            if ctypes.windll.kernel32.QueryFullProcessImageNameW(
+                    hproc, 0, path_buf, ctypes.byref(sz)):
+                return os.path.basename(path_buf.value).lower()
+        finally:
+            ctypes.windll.kernel32.CloseHandle(hproc)
+    except Exception:
+        pass
+    return ""
+
 def get_foreground_window_info():
     """Returns (exe_basename_lower, window_title) of the currently focused Windows application."""
     try:
@@ -248,6 +276,11 @@ def get_foreground_window_info():
                     sz = ctypes.c_ulong(512)
                     if ctypes.windll.kernel32.QueryFullProcessImageNameW(hproc, 0, path_buf, ctypes.byref(sz)):
                         exe_name = os.path.basename(path_buf.value).lower()
+                        # Resolve actual UWP app if frame host owns the window
+                        if exe_name == "applicationframehost.exe":
+                            real_exe = _resolve_uwp_child_exe(hwnd)
+                            if real_exe and real_exe != "applicationframehost.exe":
+                                exe_name = real_exe
                 finally:
                     ctypes.windll.kernel32.CloseHandle(hproc)
         return exe_name, title
@@ -450,6 +483,36 @@ synced_app_rules = {
     "rules": []
 }
 
+# Lock protecting synced_app_rules and synced_layers_store from concurrent
+# read (window watcher thread) vs write (sync_config_from_hub thread) races.
+_config_lock = threading.Lock()
+
+# --- Keystroke Worker Queue (Step 8) ---
+# Offloads blocking time.sleep() keystroke injection off the MQTT thread,
+# preventing ~280ms dispatch stalls during mute toggles or hotkey combos.
+import queue as _queue_mod
+_keystroke_queue: _queue_mod.Queue = _queue_mod.Queue(maxsize=64)
+
+def _keystroke_worker():
+    """Drains keystroke injection jobs off the MQTT thread."""
+    while True:
+        fn, args, kwargs = _keystroke_queue.get()
+        try:
+            fn(*args, **kwargs)
+        except Exception as e:
+            logger.error(f"Keystroke worker error: {e}")
+
+_keystroke_worker_thread = threading.Thread(target=_keystroke_worker, daemon=True,
+                                             name="KeystrokeWorker")
+_keystroke_worker_thread.start()
+
+def enqueue_keystroke(fn, *args, **kwargs):
+    """Non-blocking dispatch of keystroke injection to the worker thread."""
+    try:
+        _keystroke_queue.put_nowait((fn, args, kwargs))
+    except _queue_mod.Full:
+        logger.warning("Keystroke queue full — dropping input event")
+
 def sync_config_from_hub():
     """Fetches the latest layers, button actions, radial pie slices, icons, and auto-app rules from the Pi Hub."""
     global synced_layers_store, synced_icons_library, synced_app_rules
@@ -458,15 +521,37 @@ def sync_config_from_hub():
         url = f"http://{MQTT_BROKER}:5000/api/layers"
         with urllib.request.urlopen(url, timeout=2.5) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-            if "layers" in data:
-                synced_layers_store = data["layers"]
-            if "icons" in data:
-                synced_icons_library = data["icons"]
-            if "app_rules_config" in data:
-                synced_app_rules = data["app_rules_config"]
+            with _config_lock:
+                if "layers" in data:
+                    synced_layers_store = data["layers"]
+                if "icons" in data:
+                    synced_icons_library = data["icons"]
+                if "app_rules_config" in data:
+                    synced_app_rules = data["app_rules_config"]
             logger.info(f"[Hub Sync] Loaded {len(synced_layers_store)} layers, {len(synced_icons_library)} icons & {len(synced_app_rules.get('rules', []))} app rules (auto_app_mode={synced_app_rules.get('auto_app_mode')})")
     except Exception as e:
         logger.warning(f"[Hub Sync] Could not fetch config from {MQTT_BROKER}:5000: {e}")
+
+# Direct standard single-key shortcuts in Autodesk Fusion 360 (work in 2D sketch & 3D space)
+FUSION_DIRECT_HOTKEYS = {
+    "line": "L",
+    "circle_center": "C",
+    "circle": "C",
+    "rect_2pt": "R",
+    "rect": "R",
+    "extrude": "E",
+    "fillet": "F",
+    "dimension": "D",
+    "measure": "I",
+    "project": "P",
+    "construction": "X",
+    "offset": "O",
+    "joint": "J",
+    "move": "M",
+    "trim": "T",
+    "press_pull": "Q",
+    "hole": "H",
+}
 
 # Native Fusion 360 Add-In target mapping for CAD commands across Layers 5..13
 FUSION_ADDIN_MAP = {
@@ -775,6 +860,14 @@ def execute_action_string(action_str: str, label: str = "") -> bool:
     logger.info(f">>> [Universal Action] {label} -> {prefix}:{val} (app={exe_name})")
 
     if prefix == "fusion":
+        val_lower = val.lower()
+        if is_fusion and val_lower in FUSION_DIRECT_HOTKEYS:
+            hk = FUSION_DIRECT_HOTKEYS[val_lower]
+            send_esc_cancel()
+            time.sleep(0.02)
+            send_vk_tap(ord(hk.upper()), 0.025)
+            logger.info(f"    [Fusion 360 Direct Hotkey] Tapped '{hk}' for {val}")
+            return True
         if send_fusion_addin_command(val, action="command", cancel_first=True):
             logger.info(f"    [MacroPadFusionBridge] Executed '{val}' natively via Fusion API")
             return True
@@ -802,7 +895,26 @@ def execute_action_string(action_str: str, label: str = "") -> bool:
     elif prefix in ("cad_cmd", "cad_tcmd"):
         cancel_first = (prefix == "cad_cmd")
         if is_fusion:
-            addin_entry = FUSION_ADDIN_MAP.get(val.upper(), ("command", val))
+            cad_u = val.upper()
+            if cad_u in ("L", "PL"):
+                send_esc_cancel()
+                time.sleep(0.02)
+                send_vk_tap(ord("L"), 0.025)
+                logger.info(f"    [Fusion 360 Direct Hotkey] Tapped 'L' for {val}")
+                return True
+            elif cad_u == "C":
+                send_esc_cancel()
+                time.sleep(0.02)
+                send_vk_tap(ord("C"), 0.025)
+                logger.info(f"    [Fusion 360 Direct Hotkey] Tapped 'C' for {val}")
+                return True
+            elif cad_u == "REC":
+                send_esc_cancel()
+                time.sleep(0.02)
+                send_vk_tap(ord("R"), 0.025)
+                logger.info(f"    [Fusion 360 Direct Hotkey] Tapped 'R' for {val}")
+                return True
+            addin_entry = FUSION_ADDIN_MAP.get(cad_u, ("command", val))
             if send_fusion_addin_command(addin_entry[1], action=addin_entry[0], cancel_first=cancel_first):
                 return True
         send_cad_command(val, cancel_first=cancel_first)
@@ -884,42 +996,70 @@ def get_radial_menu_for_cell(layer: int, index: int):
         return layer_radials[index]
     return None
 
-def on_radial_slice_selected(act_type: str, act_val: str, act_label: str):
+def on_radial_slice_selected(act_type: str, act_val: str, act_label: str, fb_type: str = "", fb_val: str = "", target_hwnd: Optional[int] = None):
     """Callback invoked when a user selects a slice from the on-screen Radial Menu."""
-    logger.info(f">>> [Radial Menu Selected] {act_label} -> {act_type.upper()}: {act_val}")
+    logger.info(f">>> [Radial Menu Selected] {act_label} -> {act_type.upper()}: {act_val} (fb={fb_type}:{fb_val})")
+    
+    # 0. Ensure target CAD window has restored keyboard input focus
+    if target_hwnd:
+        try:
+            ctypes.windll.user32.ShowWindow(target_hwnd, 9)  # SW_RESTORE
+            ctypes.windll.user32.SetForegroundWindow(target_hwnd)
+        except Exception:
+            pass
+    time.sleep(0.05)  # 50ms for Windows input queue transition
+
+    # 1. Check if action has a direct native Fusion hotkey (Line, Circle, Extrude, etc.)
+    val_l = act_val.lower().strip()
+    if val_l in FUSION_DIRECT_HOTKEYS:
+        hk = FUSION_DIRECT_HOTKEYS[val_l]
+        send_esc_cancel()
+        time.sleep(0.02)
+        send_vk_tap(ord(hk.upper()), 0.025)
+        logger.info(f"    [Radial Hotkey] Tapped '{hk}' for {act_val}")
+        return
+
+    # 2. Check if slice definition specified a direct fkey (e.g. fb_type='fkey', fb_val='C')
+    if fb_type == "fkey" and fb_val:
+        send_esc_cancel()
+        time.sleep(0.02)
+        send_vk_tap(ord(fb_val.upper()), 0.025)
+        logger.info(f"    [Radial fkey] Tapped '{fb_val}' for {act_val}")
+        return
+
+    # 3. Action strings (e.g. 'action_str')
     if act_type == "action_str":
-        time.sleep(0.025)
         execute_action_string(act_val, act_label)
         return
-    elif act_type == "fusion":
-        if send_fusion_addin_command(act_val, action="command", cancel_first=True):
-            logger.info(f"    [MacroPadFusionBridge] Executed '{act_val}' natively via Fusion API")
+
+    # 4. Viewport orientation commands
+    if act_type == "fusion_view":
+        if act_val in ("home", "fit"):
+            send_vk_tap(VK_MAP["F6"], 0.025)
             return
-        # Fallback if Add-In not running yet
-        time.sleep(0.03)
-        send_fusion_search_command(act_val.replace("_", " "))
-        return
-    elif act_type == "fusion_view":
         if send_fusion_addin_command(act_val, action="view", cancel_first=False):
             logger.info(f"    [MacroPadFusionBridge] Set viewport '{act_val}' natively via Fusion API")
             return
-        time.sleep(0.03)
         send_vk_tap(VK_MAP["F6"], 0.025)
         return
 
-    time.sleep(0.03)  # Allow CAD window focus restoration
-    if act_type == "fkey":
-        send_esc_cancel()
-        time.sleep(0.03)
-        send_vk_tap(ord(act_val.upper()), 0.025)
+    # 5. AutoCAD / generic CAD commands
+    if act_type == "cmd":
+        send_cad_command(act_val, cancel_first=True)
+        return
     elif act_type == "vkey":
         vk = VK_MAP.get(act_val.upper())
         if vk:
             send_vk_tap(vk, 0.025)
-    elif act_type == "search":
-        send_fusion_search_command(act_val)
-    elif act_type == "cmd":
-        send_cad_command(act_val, cancel_first=True)
+        return
+
+    # 6. Tools without a single-letter shortcut (e.g. '3 Point Arc', 'Create Sketch', 'Center Rectangle')
+    # Use Fusion 360's native 'S' search popup
+    search_query = fb_val or act_label or act_val.replace("_", " ")
+    # Clean up shortcut hints from search query (e.g. "3-Point Arc", "Create Sketch")
+    search_clean = search_query.split("(")[0].strip().replace("\n", " ")
+    logger.info(f"    [Radial Search] Executing via 'S' Shortcuts: '{search_clean}'")
+    send_fusion_search_command(search_clean)
 
 def execute_autocad_action(layer: int, index: int, label: str = ""):
     """Executes the mapped button action from the Unified Hub store (or fallback AUTOCAD_LAYER_MAP)."""
@@ -957,6 +1097,25 @@ def execute_autocad_action(layer: int, index: int, label: str = ""):
         send_ctrl_combo(val)
     elif act_type in ("cmd", "tcmd"):
         if is_fusion:
+            cad_u = val.upper()
+            if cad_u in ("L", "PL"):
+                send_esc_cancel()
+                time.sleep(0.02)
+                send_vk_tap(ord("L"), 0.025)
+                logger.info(f"    [Fusion 360 Direct Hotkey] Tapped 'L' for {val}")
+                return
+            elif cad_u == "C":
+                send_esc_cancel()
+                time.sleep(0.02)
+                send_vk_tap(ord("C"), 0.025)
+                logger.info(f"    [Fusion 360 Direct Hotkey] Tapped 'C' for {val}")
+                return
+            elif cad_u == "REC":
+                send_esc_cancel()
+                time.sleep(0.02)
+                send_vk_tap(ord("R"), 0.025)
+                logger.info(f"    [Fusion 360 Direct Hotkey] Tapped 'R' for {val}")
+                return
             # 1. Try native Fusion 360 Add-In Bridge first (<2ms direct API execution, zero search popup)
             addin_entry = FUSION_ADDIN_MAP.get(val, ("command", val))
             if send_fusion_addin_command(addin_entry[1], action=addin_entry[0], cancel_first=(act_type == "cmd")):
@@ -1159,7 +1318,7 @@ def sync_discord_voice_call_manual():
         discord_rpc_client.refresh_voice_channel()
         time.sleep(0.15)
         if is_in_voice_call():
-            publish_voice_grid(include_layer=2, fast=False)
+            publish_voice_grid(include_layer=2, fast=True)
             publish_popup("VOICE CALL:\nSYNCED")
             return
     publish_popup("DISCORD:\nNO ACTIVE CALL")
@@ -1173,7 +1332,7 @@ def toggle_discord_demo_call():
         selected_voice_member_idx = 0
         voice_page = 0
         logger.info(">>> Started Discord 5-Member Demo Call on Layer 2")
-        publish_voice_grid(include_layer=2, fast=False)
+        publish_voice_grid(include_layer=2, fast=True)
         publish_popup("DEMO CALL ON:\nTAP=MUTE KNOB=VOL")
     else:
         logger.info(">>> Ended Discord Demo Call on Layer 2")
@@ -1697,12 +1856,12 @@ def on_message(client, userdata, msg):
 
         elif action == "top_mod_hold":
             slot = int(payload.get("slot", 1))
-            hold_top_modifier(slot)
+            enqueue_keystroke(hold_top_modifier, slot)
             return
 
         elif action == "top_mod_release":
             slot = int(payload.get("slot", 1))
-            release_top_modifier(slot)
+            enqueue_keystroke(release_top_modifier, slot)
             return
 
         # ----------------------------------------------------------------------
@@ -1710,7 +1869,7 @@ def on_message(client, userdata, msg):
         # ----------------------------------------------------------------------
         if action == "mic_mute_toggle":
             logger.info(">>> Key 13 short tap: Toggle Discord Mic Mute")
-            toggle_microphone_mute()
+            enqueue_keystroke(toggle_microphone_mute)
 
         # 13 + HW Encoder (ID 1): Master Output Control
         elif action == "audio_master_volume":
@@ -1966,9 +2125,11 @@ def on_message(client, userdata, msg):
 # ==============================================================================
 # FOREGROUND WINDOWS APP WATCHER (KEY 9 DYNAMIC AUTO-APP SWITCHER)
 # ==============================================================================
+# applicationframehost.exe intentionally excluded: resolved to real UWP app
+# via _resolve_uwp_child_exe() inside get_foreground_window_info().
 IGNORED_TRANSIENT_EXES = {
     "pythonw.exe", "python.exe", "searchhost.exe", "shellexperiencehost.exe",
-    "startmenuexperiencehost.exe", "applicationframehost.exe", "lockapp.exe"
+    "startmenuexperiencehost.exe", "lockapp.exe"
 }
 
 FRIENDLY_APP_NAMES = {
@@ -2044,7 +2205,7 @@ def publish_universal_app_grid(exe_name: str):
         "hold_mask": 0,
         "in_call": False,
         "auto_app_mode": True,
-        "fast": False
+        "fast": True
     }
     if mqtt_client and mqtt_client.is_connected():
         mqtt_client.publish(TOPIC_DISPLAY, json.dumps(payload), retain=False)
@@ -2066,12 +2227,15 @@ def handle_universal_app_key_tap(idx: int) -> bool:
     return False
 
 def match_app_rule(exe_name: str, win_title: str) -> Optional[dict]:
-    """Checks synced_app_rules for a rule matching exe_name or win_title (supports pipe-delimited patterns)."""
+    """Checks synced_app_rules for a rule matching exe_name or win_title (supports pipe-delimited patterns).
+    Thread-safe: snapshot of rules list is taken under _config_lock."""
     if not exe_name and not win_title:
         return None
     exe_l = exe_name.lower()
     title_l = win_title.lower()
-    rules_list = synced_app_rules.get("rules") or synced_app_rules.get("app_rules") or []
+    with _config_lock:
+        rules_list = list(synced_app_rules.get("rules") or
+                          synced_app_rules.get("app_rules") or [])
     for rule in rules_list:
         if rule.get("enabled") is False:
             continue
@@ -2089,7 +2253,7 @@ def match_app_rule(exe_name: str, win_title: str) -> Optional[dict]:
                     return rule
     return None
 
-def apply_layer_via_hub(target_layer: int, force_static: bool = False):
+def apply_layer_via_hub(target_layer: int, force_static: bool = False, fast: bool = True):
     """Requests the Raspberry Pi Unified Hub to push target_layer to the MacroPad.
     If target_layer == 2 (Discord) and user is in a voice call (or Demo Call), pushes the dynamic call member grid."""
     global current_active_layer, universal_app_overlay_active
@@ -2099,19 +2263,20 @@ def apply_layer_via_hub(target_layer: int, force_static: bool = False):
         if discord_rpc_client and discord_rpc_client.is_authenticated:
             discord_rpc_client.refresh_voice_channel()
         if is_in_voice_call():
-            publish_voice_grid(include_layer=2, fast=False)
+            publish_voice_grid(include_layer=2, fast=fast)
             logger.info("[Auto-App Switch] Switched MacroPad to Layer 2 (Discord Live Voice Call Grid)")
             return
     try:
         import urllib.request
+        fast_param = "true" if fast else "false"
         req = urllib.request.Request(
-            f"http://{MQTT_BROKER}:5000/api/layers/{target_layer}/apply",
+            f"http://{MQTT_BROKER}:5000/api/layers/{target_layer}/apply?fast={fast_param}",
             data=b'{}',
             headers={'Content-Type': 'application/json'},
             method='POST'
         )
         urllib.request.urlopen(req, timeout=1.5)
-        logger.info(f"[Auto-App Switch] Switched MacroPad to Layer {target_layer}")
+        logger.info(f"[Auto-App Switch] Switched MacroPad to Layer {target_layer} (fast={fast})")
     except Exception as e:
         logger.warning(f"[Auto-App Switch] Failed to switch to Layer {target_layer}: {e}")
 
@@ -2149,9 +2314,11 @@ def start_window_watcher():
             rule = match_app_rule(exe_name, win_title)
             t_layer = int(rule.get("target_layer") or rule.get("layer") or 1) if rule else None
             app_short = get_clean_app_name(exe_name)
+            with _config_lock:
+                auto_mode = synced_app_rules.get("auto_app_mode", False)
             if rule:
                 matched_name = f"{rule.get('name')} -> L{t_layer}"
-            elif synced_app_rules.get("auto_app_mode", False):
+            elif auto_mode:
                 matched_name = f"{app_short} (Universal)"
             else:
                 matched_name = ""
@@ -2172,7 +2339,7 @@ def start_window_watcher():
                     mqtt_client.publish(TOPIC_DISPLAY, json.dumps({"pc_online": True}), retain=False)
 
             # Auto-switch layer if Auto-App Mode (Key 9) is enabled
-            if synced_app_rules.get("auto_app_mode", False):
+            if auto_mode:
                 if rule and t_layer:
                     last_universal_exe = ""
                     if force_app_reeval or universal_app_overlay_active or (t_layer != current_active_layer and t_layer != last_auto_target_layer):

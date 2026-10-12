@@ -965,6 +965,9 @@ STUDIO_HTML_CONTENT = r"""<!DOCTYPE html>
       <strong id="focused-app-text" style="color:var(--accent-cyan); font-family:var(--font-mono);">--</strong>
     </div>
 
+    <a href="/debug/backlight" class="btn" style="color:var(--accent-amber); border-color:rgba(255,184,0,0.4);" title="Open Dedicated Screen Backlight & LED Calibrator">
+      💡 Backlight
+    </a>
     <a href="/debug" class="btn" title="Open Engineering Telemetry, Battery Curves, MQTT & Raw Logs">
       🛠️ Debug & Telemetry
     </a>

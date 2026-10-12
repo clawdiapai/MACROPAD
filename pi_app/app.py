@@ -4,6 +4,7 @@ import datetime
 import json
 import logging
 import os
+import queue
 import sqlite3
 import sys
 import threading
@@ -58,20 +59,48 @@ def init_db():
 
 init_db()
 
+# --- Battery Telemetry Queue Writer (Step 3: non-blocking SQLite from MQTT thread) ---
+_battery_log_queue: queue.Queue = queue.Queue(maxsize=500)
+
+def _battery_writer_loop():
+    """Dedicated background thread that drains battery telemetry to SQLite
+    without blocking the MQTT or asyncio threads."""
+    conn = sqlite3.connect(DB_PATH, timeout=5.0)
+    conn.execute("PRAGMA journal_mode=WAL")  # WAL allows concurrent reads
+    conn.commit()
+    while True:
+        batch = []
+        # Block until at least one item, then drain up to 50
+        try:
+            batch.append(_battery_log_queue.get(timeout=10))
+        except queue.Empty:
+            continue
+        while len(batch) < 50:
+            try:
+                batch.append(_battery_log_queue.get_nowait())
+            except queue.Empty:
+                break
+        try:
+            c = conn.cursor()
+            c.executemany('''
+                INSERT INTO battery_logs (timestamp, time_str, vbat, batt_pct, rssi, state)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', batch)
+            conn.commit()
+        except Exception:
+            pass
+
+_battery_writer_thread = threading.Thread(target=_battery_writer_loop, daemon=True)
+_battery_writer_thread.start()
+
 def log_battery_to_db(vbat: float, batt_pct: int, rssi: int, state: str):
+    """Non-blocking: enqueues battery telemetry for the writer thread."""
+    now = time.time()
+    time_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
-        now = time.time()
-        time_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        conn = sqlite3.connect(DB_PATH, timeout=2.0)
-        c = conn.cursor()
-        c.execute('''
-            INSERT INTO battery_logs (timestamp, time_str, vbat, batt_pct, rssi, state)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (now, time_str, vbat, batt_pct, rssi, state))
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        pass
+        _battery_log_queue.put_nowait((now, time_str, vbat, batt_pct, rssi, state))
+    except queue.Full:
+        pass  # Drop oldest telemetry point under extreme load
 
 # ==============================================================================
 # STATE & LOG BUFFER
@@ -545,6 +574,8 @@ def on_mqtt_message(client, userdata, msg):
         broadcast_state()
 
     # 5. PC BRIDGE TELEMETRY & FOCUSED WINDOW STREAM
+    # NOTE: The PC Bridge (macropad_bridge.py) is the sole authority for auto-app
+    # layer switching via apply_layer_via_hub(). The Hub only updates dashboard state.
     elif topic == "macropad/pc_telemetry":
         exe = payload.get("exe", "")
         title = payload.get("title", "")
@@ -552,20 +583,11 @@ def on_mqtt_message(client, userdata, msg):
         device_state["pc_bridge_last_seen"] = time.time()
         device_state["focused_app_exe"] = exe
         device_state["focused_app_title"] = title
+        # Display-only: update dashboard matched rule label (no macropad/display publish)
         rule = layer_manager.match_app_rule(exe, title)
         if rule:
             target_l = int(rule.get("target_layer") or rule.get("layer") or 1)
             device_state["active_app_rule"] = f"{rule.get('name')} -> L{target_l}"
-            if device_state.get("auto_app_mode") and device_state.get("layer") != target_l:
-                if not (target_l == 2 and device_state.get("in_call")):
-                    layer_payload = layer_manager.build_mqtt_payload(target_l, fast=False)
-                    if layer_payload:
-                        mqtt_client.publish(TOPIC_DISPLAY, json.dumps(layer_payload), retain=False)
-                        device_state["layer"] = target_l
-                        device_state["bank"] = ((target_l - 1) // 4) + 1
-                        device_state["slot"] = ((target_l - 1) % 4) + 1
-                        device_state["grid_labels"] = layer_payload["labels"]
-                        add_log_entry("SYSTEM", "AUTO-APP", f"🤖 Focused '{rule.get('name')}' ({exe}) -> Auto-switched MacroPad to Layer {target_l}")
         else:
             device_state["active_app_rule"] = payload.get("matched_rule", "")
         broadcast_state()
@@ -656,15 +678,49 @@ async def export_logs():
 # Universal Notification Dispatcher (WhatsApp / Home Assistant / PC Alerts)
 @app.post("/api/macropad/toggle_stay_awake")
 async def toggle_macropad_stay_awake():
+    """Non-blocking: uses aiohttp so the event loop is never stalled."""
     try:
-        import urllib.request
-        toggle_req = urllib.request.Request("http://192.168.1.58/api/toggle_stay_awake", data=b"", headers={"User-Agent": "MacroPadHub"}, method="POST")
-        with urllib.request.urlopen(toggle_req, timeout=2.0) as t_resp:
-            res_str = t_resp.read().decode().strip()
-            device_state["stay_awake"] = (res_str == "ON")
-            add_log_entry("SYSTEM", "POWER", f"MacroPad Stay Awake toggled -> {res_str}")
-            broadcast_state()
-            return {"status": "ok", "stay_awake": device_state["stay_awake"]}
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "http://192.168.1.58/api/toggle_stay_awake",
+                headers={"User-Agent": "MacroPadHub"},
+                timeout=aiohttp.ClientTimeout(total=2.0)
+            ) as resp:
+                res_str = (await resp.text()).strip()
+                device_state["stay_awake"] = (res_str == "ON")
+                add_log_entry("SYSTEM", "POWER",
+                              f"MacroPad Stay Awake toggled -> {res_str}")
+                broadcast_state()
+                return {"status": "ok", "stay_awake": device_state["stay_awake"]}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.api_route("/api/macropad/screen_led", methods=["GET", "POST"])
+async def proxy_macropad_screen_led(request: Request):
+    """Proxies screen LED RGB/state requests to the physical MacroPad (192.168.1.58)."""
+    try:
+        import aiohttp
+        params = dict(request.query_params)
+        url = "http://192.168.1.58/api/screen_led"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=2.0)) as resp:
+                data = await resp.json()
+                return data
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.api_route("/api/macropad/wifi_sleep", methods=["GET", "POST"])
+async def proxy_macropad_wifi_sleep(request: Request):
+    """Proxies Wi-Fi power save mode changes to the physical MacroPad (192.168.1.58)."""
+    try:
+        import aiohttp
+        params = dict(request.query_params)
+        url = "http://192.168.1.58/api/wifi_sleep"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=2.0)) as resp:
+                data = await resp.json()
+                return data
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
@@ -750,26 +806,23 @@ async def get_whatsapp_recent_chats():
             return []
     return []
 
-# Battery Long-term History API (SQLite)
-@app.get("/api/battery/history")
-async def get_battery_history(hours: int = 48):
+# Battery Long-term History API (SQLite) — offloaded via asyncio.to_thread
+def _sync_get_battery_history(hours: int):
+    """Synchronous SQLite query — called from a thread pool, never on the event loop."""
     try:
         since = time.time() - (hours * 3600)
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=2.0)
         c = conn.cursor()
         c.execute('''
-            SELECT time_str, vbat, batt_pct, rssi, state, timestamp 
-            FROM battery_logs 
-            WHERE timestamp >= ? 
+            SELECT time_str, vbat, batt_pct, rssi, state, timestamp
+            FROM battery_logs
+            WHERE timestamp >= ?
             ORDER BY timestamp ASC
         ''', (since,))
         rows = c.fetchall()
         conn.close()
-        
         # Subsample if too many rows for smooth charting
         step = max(1, len(rows) // 300)
-        downsampled = rows[::step]
-
         return [
             {
                 "time": r[0],
@@ -779,10 +832,15 @@ async def get_battery_history(hours: int = 48):
                 "state": r[4],
                 "ts": r[5]
             }
-            for r in downsampled
+            for r in rows[::step]
         ]
-    except Exception as e:
+    except Exception:
         return []
+
+@app.get("/api/battery/history")
+async def get_battery_history(hours: int = 48):
+    """Non-blocking battery history — SQLite query runs in a thread pool."""
+    return await asyncio.to_thread(_sync_get_battery_history, hours)
 
 @app.post("/api/whatsapp/config")
 async def save_whatsapp_config(data: Dict[str, Any]):
@@ -925,7 +983,7 @@ async def delete_layer_by_id(layer_id: int):
     return {"status": "deleted" if ok else "not_found"}
 
 @app.post("/api/layers/{layer_id}/apply")
-async def apply_layer_to_pad(layer_id: int, fast: bool = False):
+async def apply_layer_to_pad(layer_id: int, fast: bool = True):
     payload = layer_manager.build_mqtt_payload(layer_id, fast=fast)
     if not payload:
         raise HTTPException(status_code=404, detail="Layer not found or empty")
@@ -1456,6 +1514,7 @@ HTML_CONTENT = """<!DOCTYPE html>
         <button class="btn-icon" id="btn-autoscroll" title="Auto-scroll toggle">⚡ Scroll: ON</button>
         <button class="btn-icon" id="btn-clear" title="Clear view">Clear</button>
         <a href="/api/export_logs" class="btn-icon" style="text-decoration:none;" download>Export</a>
+        <a href="/debug/backlight" class="btn-icon" style="text-decoration:none; color:var(--accent-amber);" title="Screen Backlight, Color & Brightness Calibrator">💡 Backlight Studio</a>
         <a href="http://192.168.1.58" target="_blank" class="btn-icon" style="text-decoration:none; color:var(--accent-cyan);" title="Open ESP32 Hardware/OTA Page">ESP32 OTA ↗</a>
       </div>
     </div>
@@ -1467,6 +1526,69 @@ HTML_CONTENT = """<!DOCTYPE html>
 
   <!-- UNIFIED CONTROL SURFACE SIDEBAR (PC BRIDGE + PI HUB + DEVICE) -->
   <aside class="sidebar-section">
+
+    <!-- 0. SCREEN BACKLIGHT & LED COLOR/BRIGHTNESS CALIBRATOR -->
+    <div class="card" id="backlight-card" style="border-color:#382d18;">
+      <div class="card-title">
+        <span>💡 Screen Backlight &amp; LEDs</span>
+        <a href="/debug/backlight" class="badge-state state-sleeping" style="font-size:9px; padding:1px 6px; text-decoration:none; cursor:pointer;" title="Open Dedicated Backlight Calibrator">FULL STUDIO ↗</a>
+      </div>
+
+      <div style="display:flex; justify-content:space-between; align-items:center; background:#111822; padding:6px 10px; border-radius:4px; border:1px solid var(--border-color);">
+        <span style="font-size:11px; font-weight:bold; color:var(--accent-amber);" id="dbg-backlight-status">Backlight: ON</span>
+        <div style="display:flex; gap:6px; align-items:center;">
+          <button class="btn btn-amber" style="padding:2px 8px; font-size:10px;" onclick="dbgToggleBacklight()">Toggle</button>
+          <input type="color" id="dbg-color-picker" value="#b45000" onchange="dbgColorPicked(this.value)" style="border:none; width:26px; height:22px; border-radius:3px; cursor:pointer; background:none;">
+        </div>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:4px; font-size:11px;">
+        <div style="display:flex; justify-content:space-between;">
+          <span style="color:#ff5566;">Red: <b id="dbg-lbl-r">180</b></span>
+          <span style="color:#00ff66;">Green: <b id="dbg-lbl-g">80</b></span>
+          <span style="color:#3a86ff;">Blue: <b id="dbg-lbl-b">0</b></span>
+        </div>
+        <div style="display:flex; gap:6px; align-items:center;">
+          <input type="range" min="0" max="255" value="180" id="dbg-rng-r" style="accent-color:#ff5566; flex:1;" oninput="dbgSliderChange()">
+          <input type="range" min="0" max="255" value="80" id="dbg-rng-g" style="accent-color:#00ff66; flex:1;" oninput="dbgSliderChange()">
+          <input type="range" min="0" max="255" value="0" id="dbg-rng-b" style="accent-color:#3a86ff; flex:1;" oninput="dbgSliderChange()">
+        </div>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:2px; font-size:11px; margin-top:2px;">
+        <div style="display:flex; justify-content:space-between;">
+          <span style="color:var(--accent-amber);">Brightness: <b id="dbg-lbl-bri">100%</b></span>
+        </div>
+        <input type="range" min="5" max="100" value="100" id="dbg-rng-bri" style="accent-color:var(--accent-amber); width:100%; cursor:pointer;" oninput="dbgBrightnessChange(this.value)">
+      </div>
+
+      <div style="display:flex; gap:4px; flex-wrap:wrap; margin-top:2px;">
+        <button class="btn" style="padding:2px 6px; font-size:9px;" onclick="dbgSetPreset(160,25,0)">🕯️ Candle</button>
+        <button class="btn" style="padding:2px 6px; font-size:9px;" onclick="dbgSetPreset(180,80,0)">☀️ Gold</button>
+        <button class="btn" style="padding:2px 6px; font-size:9px;" onclick="dbgSetPreset(180,0,0)">🩸 Ruby</button>
+        <button class="btn" style="padding:2px 6px; font-size:9px;" onclick="dbgSetPreset(70,15,0)">🌙 Stealth</button>
+        <button class="btn" style="padding:2px 6px; font-size:9px;" onclick="dbgSetPreset(0,140,140)">🧊 Cyan</button>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:2px; font-size:11px; margin-top:2px;">
+        <div style="display:flex; justify-content:space-between;">
+          <span style="color:var(--accent-cyan);">Motion: <b id="dbg-lbl-anim">Candle</b></span>
+        </div>
+        <div style="display:flex; gap:4px; margin-top:1px;">
+          <button class="btn" style="padding:2px 5px; font-size:9px; flex:1;" onclick="dbgSetAnim(0)">Fixed</button>
+          <button class="btn" style="padding:2px 5px; font-size:9px; flex:1;" onclick="dbgSetAnim(1)">🕯️ Candle</button>
+          <button class="btn" style="padding:2px 5px; font-size:9px; flex:1;" onclick="dbgSetAnim(2)">🌊 Breathe</button>
+          <button class="btn" style="padding:2px 5px; font-size:9px; flex:1;" onclick="dbgSetAnim(3)">☯️ Aurora</button>
+        </div>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:2px; font-size:11px; margin-top:2px;">
+        <div style="display:flex; justify-content:space-between;">
+          <span style="color:var(--accent-cyan);">Speed: <b id="dbg-lbl-spd">1.0x</b></span>
+        </div>
+        <input type="range" min="20" max="300" value="100" id="dbg-rng-spd" style="accent-color:var(--accent-cyan); width:100%; cursor:pointer;" oninput="dbgSpeedChange(this.value)">
+      </div>
+    </div>
 
     <!-- 1. AUTO-APP MODE & WINDOW TRACKER STUDIO (KEY 9) -->
     <div class="card" id="auto-app-card" style="border-color:#26354d;">
@@ -1889,6 +2011,90 @@ HTML_CONTENT = """<!DOCTYPE html>
     9: 'HUD', 10: 'ACT 4', 11: 'ACT 5', 12: 'ACT 6',
     13: 'AUD MOD', 14: 'LT SLP', 15: 'SLEEP', 16: 'WOL PC'
   };
+
+  let dbgBacklightOn = true;
+  let dbgR = 180, dbgG = 80, dbgB = 0;
+  let dbgBri = 100;
+  let dbgAnim = 1;
+  let dbgSpd = 100;
+  let dbgTimeout = null;
+
+  function dbgSendBacklight() {
+    clearTimeout(dbgTimeout);
+    dbgTimeout = setTimeout(() => {
+      const pwr = dbgBacklightOn ? 'on' : 'off';
+      fetch(`/api/macropad/screen_led?state=${pwr}&r=${dbgR}&g=${dbgG}&b=${dbgB}&bri=${dbgBri}&anim=${dbgAnim}&spd=${dbgSpd}`, {method:'POST'}).catch(()=>{});
+    }, 40);
+  }
+
+  function dbgSpeedChange(val) {
+    dbgSpd = parseInt(val) || 100;
+    const mult = (dbgSpd / 100.0).toFixed(1);
+    document.getElementById('dbg-lbl-spd').innerText = `${mult}x`;
+    dbgSendBacklight();
+  }
+
+  function dbgSetAnim(m) {
+    dbgAnim = m;
+    const names = ['Fixed', 'Candle', 'Breathe', 'Aurora'];
+    document.getElementById('dbg-lbl-anim').innerText = names[m] || 'Fixed';
+    dbgSendBacklight();
+  }
+
+  function dbgBrightnessChange(val) {
+    dbgBri = parseInt(val) || 100;
+    document.getElementById('dbg-lbl-bri').innerText = `${dbgBri}%`;
+    dbgSendBacklight();
+  }
+
+  function dbgToggleBacklight() {
+    dbgBacklightOn = !dbgBacklightOn;
+    document.getElementById('dbg-backlight-status').innerText = dbgBacklightOn ? 'Backlight: ON' : 'Backlight: OFF';
+    dbgSendBacklight();
+  }
+
+  function dbgSliderChange() {
+    dbgR = parseInt(document.getElementById('dbg-rng-r').value);
+    dbgG = parseInt(document.getElementById('dbg-rng-g').value);
+    dbgB = parseInt(document.getElementById('dbg-rng-b').value);
+    document.getElementById('dbg-lbl-r').innerText = dbgR;
+    document.getElementById('dbg-lbl-g').innerText = dbgG;
+    document.getElementById('dbg-lbl-b').innerText = dbgB;
+    const toH = n => { const s = n.toString(16); return s.length === 1 ? '0'+s : s; };
+    document.getElementById('dbg-color-picker').value = `#${toH(dbgR)}${toH(dbgG)}${toH(dbgB)}`;
+    dbgSendBacklight();
+  }
+
+  function dbgColorPicked(hex) {
+    dbgR = parseInt(hex.substr(1,2),16);
+    dbgG = parseInt(hex.substr(3,2),16);
+    dbgB = parseInt(hex.substr(5,2),16);
+    document.getElementById('dbg-rng-r').value = dbgR;
+    document.getElementById('dbg-rng-g').value = dbgG;
+    document.getElementById('dbg-rng-b').value = dbgB;
+    document.getElementById('dbg-lbl-r').innerText = dbgR;
+    document.getElementById('dbg-lbl-g').innerText = dbgG;
+    document.getElementById('dbg-lbl-b').innerText = dbgB;
+    dbgSendBacklight();
+  }
+
+  function dbgSetPreset(r, g, b) {
+    dbgR = r; dbgG = g; dbgB = b;
+    dbgBri = 100;
+    dbgBacklightOn = true;
+    document.getElementById('dbg-backlight-status').innerText = 'Backlight: ON';
+    document.getElementById('dbg-rng-bri').value = 100;
+    document.getElementById('dbg-lbl-bri').innerText = '100%';
+    document.getElementById('dbg-rng-r').value = r;
+    document.getElementById('dbg-rng-g').value = g;
+    document.getElementById('dbg-rng-b').value = b;
+    document.getElementById('dbg-lbl-r').innerText = r;
+    document.getElementById('dbg-lbl-g').innerText = g;
+    document.getElementById('dbg-lbl-b').innerText = b;
+    const toH = n => { const s = n.toString(16); return s.length === 1 ? '0'+s : s; };
+    document.getElementById('dbg-color-picker').value = `#${toH(r)}${toH(g)}${toH(b)}`;
+    dbgSendBacklight();
+  }
 
   function initMatrixVisualizer() {
     const container = document.getElementById('matrix-visualizer');
@@ -2780,6 +2986,7 @@ HTML_CONTENT = """<!DOCTYPE html>
 """
 
 from studio_ui import STUDIO_HTML_CONTENT
+from backlight_ui import BACKLIGHT_HTML_CONTENT
 
 @app.get("/", response_class=HTMLResponse)
 async def serve_studio():
@@ -2788,6 +2995,14 @@ async def serve_studio():
 @app.get("/debug", response_class=HTMLResponse)
 async def serve_debug_dashboard():
     return HTML_CONTENT
+
+@app.get("/debug/backlight", response_class=HTMLResponse)
+async def serve_backlight_studio():
+    return BACKLIGHT_HTML_CONTENT
+
+@app.get("/backlight", response_class=HTMLResponse)
+async def serve_backlight_alias():
+    return BACKLIGHT_HTML_CONTENT
 
 # ==============================================================================
 # MAIN RUNNER

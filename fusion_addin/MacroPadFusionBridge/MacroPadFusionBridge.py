@@ -30,11 +30,11 @@ COMMAND_CANDIDATES = {
     "create_sketch": ["SketchCreate", "Create Sketch"],
     "finish_sketch": ["FinishSketch", "FinishSketchCommand", "Finish Sketch"],
     # 2D Sketch Primitives
-    "line": ["Line"],
+    "line": ["SketchCreateLine", "LineCommand", "FusionLineCommand", "Line", "Create Line"],
     "rect_2pt": ["TwoPointRectangle", "2-Point Rectangle"],
     "rect_3pt": ["ThreePointRectangle", "3-Point Rectangle"],
     "rect_center": ["CenterRectangle", "Center Rectangle"],
-    "circle_center": ["CircleCenterRadius", "Center Diameter Circle"],
+    "circle_center": ["SketchCreateCircleCenterDiameter", "CenterDiameterCircleCommand", "CircleCenterRadius", "Center Diameter Circle"],
     "circle_2pt": ["CircleTwoPoint", "2-Point Circle"],
     "circle_3pt": ["CircleThreePoint", "3-Point Circle"],
     "circle_tan": ["CircleTwoTangent", "2-Tangent Circle"],
@@ -179,12 +179,13 @@ def _resolve_command_def(key_or_name: str) -> adsk.core.CommandDefinition:
         if cmd_def:
             return cmd_def
 
-    # 4. Substring match on command names if not found
-    for k, cid in _name_to_id_cache.items():
-        if norm in k:
-            cmd_def = defs.itemById(cid)
-            if cmd_def:
-                return cmd_def
+    # 4. Token/word match on command names if not found (avoid false positives on short words like line/arc)
+    if len(norm) >= 4:
+        for k, cid in _name_to_id_cache.items():
+            if norm == k or f" {norm} " in f" {k} " or k.endswith(f"_{norm}") or k.startswith(f"{norm}_"):
+                cmd_def = defs.itemById(cid)
+                if cmd_def:
+                    return cmd_def
 
     return None
 

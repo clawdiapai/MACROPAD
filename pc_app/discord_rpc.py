@@ -150,23 +150,29 @@ class DiscordVoiceRPC:
             k32.WriteFile(self.handle, buf, len(buf), ctypes.byref(written), None)
 
     def _read_raw(self):
+        """Reads one IPC frame. Serialized with _send_lock to prevent concurrent
+        ReadFile/WriteFile on the same handle across threads (GIL not held during ctypes)."""
         if not self.is_connected or self.handle in (INVALID_HANDLE_VALUE, 0):
             return None, None
-        hdr = ctypes.create_string_buffer(8)
-        read_bytes = wintypes.DWORD()
-        res = k32.ReadFile(self.handle, hdr, 8, ctypes.byref(read_bytes), None)
-        if not res or read_bytes.value < 8:
-            return None, None
-        op, length = struct.unpack("<II", hdr.raw)
-        data = ctypes.create_string_buffer(length)
-        total = 0
-        while total < length:
-            chunk = ctypes.create_string_buffer(length - total)
-            res = k32.ReadFile(self.handle, chunk, length - total, ctypes.byref(read_bytes), None)
-            if not res or read_bytes.value == 0:
-                break
-            data.raw = data.raw[:total] + chunk.raw[:read_bytes.value] + data.raw[total + read_bytes.value:]
-            total += read_bytes.value
+        with self._send_lock:
+            hdr = ctypes.create_string_buffer(8)
+            read_bytes = wintypes.DWORD()
+            res = k32.ReadFile(self.handle, hdr, 8, ctypes.byref(read_bytes), None)
+            if not res or read_bytes.value < 8:
+                return None, None
+            op, length = struct.unpack("<II", hdr.raw)
+            data = ctypes.create_string_buffer(length)
+            total = 0
+            while total < length:
+                chunk = ctypes.create_string_buffer(length - total)
+                res = k32.ReadFile(self.handle, chunk, length - total,
+                                   ctypes.byref(read_bytes), None)
+                if not res or read_bytes.value == 0:
+                    break
+                data.raw = (data.raw[:total]
+                            + chunk.raw[:read_bytes.value]
+                            + data.raw[total + read_bytes.value:])
+                total += read_bytes.value
         try:
             return op, json.loads(data.raw[:length].decode("utf-8"))
         except Exception as e:

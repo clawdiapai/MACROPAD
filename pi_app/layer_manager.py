@@ -460,9 +460,12 @@ class LayerManager:
         self.save()
 
     def save(self):
+        """Atomic save: write to a .tmp file then os.replace() to prevent
+        data corruption on power failure (never leaves a truncated file)."""
         try:
             self.app_rules = _normalize_rules(self.app_rules)
-            custom_icons = {k: v for k, v in self.icons_library.items() if v.get("custom", False)}
+            custom_icons = {k: v for k, v in self.icons_library.items()
+                           if v.get("custom", False)}
             data = {
                 "layers": self.layers,
                 "custom_icons": custom_icons,
@@ -472,8 +475,12 @@ class LayerManager:
                 "fallback_layer": self.fallback_layer,
                 "top_modifiers": self.top_modifiers
             }
-            with open(self.store_path, "w", encoding="utf-8") as f:
+            tmp_path = self.store_path + ".tmp"
+            with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())  # Force flush to storage before rename
+            os.replace(tmp_path, self.store_path)  # Atomic on POSIX & Windows
         except Exception as e:
             print(f"[LayerManager] Error saving store: {e}")
 

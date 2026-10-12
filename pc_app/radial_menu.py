@@ -266,10 +266,13 @@ class RadialMenuOverlay:
             act_type = chosen.get("type", "search")
             act_val = chosen.get("val", "")
             act_lbl = chosen.get("label", "").replace("\n", " ")
+            fb_type = chosen.get("fb_type", "")
+            fb_val = chosen.get("fb_val", "")
+            target_hwnd = self.target_hwnd
             self._hide()
             threading.Thread(
                 target=self.on_select_callback,
-                args=(act_type, act_val, act_lbl),
+                args=(act_type, act_val, act_lbl, fb_type, fb_val, target_hwnd),
                 daemon=True
             ).start()
         else:

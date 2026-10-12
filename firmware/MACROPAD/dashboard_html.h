@@ -211,6 +211,55 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
       </div>
     </div>
     <div class="card">
+      <div class="card-h"><span>Screen Backlight</span><span id="m-led-status" style="color:var(--amber);">ON</span></div>
+      <div class="ctrl-row">
+        <button class="btn" style="flex:1;" onclick="toggleLed()">Toggle Backlight</button>
+        <input type="color" id="dev-picker" value="#b45000" onchange="devColorPicked(this.value)" style="border:none; width:30px; height:24px; border-radius:4px; cursor:pointer; background:none;">
+      </div>
+      <div style="display:flex; flex-direction:column; gap:4px; font-size:10px; margin-top:4px;">
+        <div style="display:flex; justify-content:space-between;">
+          <span style="color:#ff5566;">R: <b id="dev-lbl-r">180</b></span>
+          <span style="color:#00ff66;">G: <b id="dev-lbl-g">80</b></span>
+          <span style="color:#3a86ff;">B: <b id="dev-lbl-b">0</b></span>
+        </div>
+        <div style="display:flex; gap:4px;">
+          <input type="range" min="0" max="255" value="180" id="dev-rng-r" style="accent-color:#ff5566; flex:1;" oninput="devSliderChange()">
+          <input type="range" min="0" max="255" value="80" id="dev-rng-g" style="accent-color:#00ff66; flex:1;" oninput="devSliderChange()">
+          <input type="range" min="0" max="255" value="0" id="dev-rng-b" style="accent-color:#3a86ff; flex:1;" oninput="devSliderChange()">
+        </div>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:2px; font-size:10px; margin-top:4px;">
+        <div style="display:flex; justify-content:space-between;">
+          <span style="color:var(--amber);">🔆 Brightness: <b id="dev-lbl-bri">100%</b></span>
+        </div>
+        <input type="range" min="5" max="100" value="100" id="dev-rng-bri" style="accent-color:var(--amber); width:100%; cursor:pointer;" oninput="devBrightnessChange(this.value)">
+      </div>
+      <div class="ctrl-row" style="margin-top:4px;">
+        <button class="btn" style="flex:1; font-size:9px;" onclick="devSetPreset(160,25,0)">🕯️ Candle</button>
+        <button class="btn" style="flex:1; font-size:9px;" onclick="devSetPreset(180,80,0)">☀️ Gold</button>
+        <button class="btn" style="flex:1; font-size:9px;" onclick="devSetPreset(180,0,0)">🩸 Ruby</button>
+        <button class="btn" style="flex:1; font-size:9px;" onclick="devSetPreset(70,15,0)">🌙 Low</button>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:2px; font-size:10px; margin-top:4px;">
+        <div style="display:flex; justify-content:space-between;">
+          <span style="color:var(--cyan);">✨ Backlight Motion: <b id="dev-lbl-anim">Candle</b></span>
+        </div>
+        <div class="ctrl-row" style="margin-top:2px;">
+          <button class="btn" style="flex:1; font-size:9px;" onclick="devSetAnim(0)">Fixed</button>
+          <button class="btn" style="flex:1; font-size:9px;" onclick="devSetAnim(1)">🕯️ Candle</button>
+          <button class="btn" style="flex:1; font-size:9px;" onclick="devSetAnim(2)">🌊 Breathe</button>
+          <button class="btn" style="flex:1; font-size:9px;" onclick="devSetAnim(3)">☯️ Aurora</button>
+        </div>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:2px; font-size:10px; margin-top:4px;">
+        <div style="display:flex; justify-content:space-between;">
+          <span style="color:var(--cyan);">⚡ Motion Speed: <b id="dev-lbl-spd">1.0x</b></span>
+        </div>
+        <input type="range" min="20" max="300" value="100" id="dev-rng-spd" style="accent-color:var(--cyan); width:100%; cursor:pointer;" oninput="devSpeedChange(this.value)">
+      </div>
+    </div>
+
+    <div class="card">
       <div class="card-h">System Controls</div>
       <div class="ctrl-row">
         <button class="btn" style="flex:1; border-color:var(--amber); color:var(--amber);" onclick="testDeepSleep()">Test Deep Sleep</button>
@@ -415,6 +464,89 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     if (confirm("Reboot MacroPad?")) {
       fetch('/api/reboot', { method: 'POST' });
     }
+  }
+  let devLedOn = true;
+  let devR = 180, devG = 80, devB = 0;
+  let devBri = 100;
+  let devAnim = 1;
+  let devSpd = 100;
+  let devTimer = null;
+
+  function devSendBacklight() {
+    clearTimeout(devTimer);
+    devTimer = setTimeout(() => {
+      const p = devLedOn ? 'on' : 'off';
+      fetch(`/api/screen_led?state=${p}&r=${devR}&g=${devG}&b=${devB}&bri=${devBri}&anim=${devAnim}&spd=${devSpd}`).catch(()=>{});
+    }, 40);
+  }
+
+  function devSpeedChange(val) {
+    devSpd = parseInt(val) || 100;
+    const mult = (devSpd / 100.0).toFixed(1);
+    document.getElementById('dev-lbl-spd').innerText = `${mult}x`;
+    devSendBacklight();
+  }
+
+  function devSetAnim(m) {
+    devAnim = m;
+    const names = ['Fixed', 'Candle', 'Breathe', 'Aurora'];
+    document.getElementById('dev-lbl-anim').innerText = names[m] || 'Fixed';
+    devSendBacklight();
+  }
+
+  function devBrightnessChange(val) {
+    devBri = parseInt(val) || 100;
+    document.getElementById('dev-lbl-bri').innerText = `${devBri}%`;
+    devSendBacklight();
+  }
+
+  function toggleLed() {
+    devLedOn = !devLedOn;
+    document.getElementById('m-led-status').innerText = devLedOn ? 'ON' : 'OFF';
+    devSendBacklight();
+  }
+
+  function devSliderChange() {
+    devR = parseInt(document.getElementById('dev-rng-r').value);
+    devG = parseInt(document.getElementById('dev-rng-g').value);
+    devB = parseInt(document.getElementById('dev-rng-b').value);
+    document.getElementById('dev-lbl-r').innerText = devR;
+    document.getElementById('dev-lbl-g').innerText = devG;
+    document.getElementById('dev-lbl-b').innerText = devB;
+    const toH = n => { const s = n.toString(16); return s.length === 1 ? '0'+s : s; };
+    document.getElementById('dev-picker').value = `#${toH(devR)}${toH(devG)}${toH(devB)}`;
+    devSendBacklight();
+  }
+
+  function devColorPicked(hex) {
+    devR = parseInt(hex.substr(1,2),16);
+    devG = parseInt(hex.substr(3,2),16);
+    devB = parseInt(hex.substr(5,2),16);
+    document.getElementById('dev-rng-r').value = devR;
+    document.getElementById('dev-rng-g').value = devG;
+    document.getElementById('dev-rng-b').value = devB;
+    document.getElementById('dev-lbl-r').innerText = devR;
+    document.getElementById('dev-lbl-g').innerText = devG;
+    document.getElementById('dev-lbl-b').innerText = devB;
+    devSendBacklight();
+  }
+
+  function devSetPreset(r, g, b) {
+    devR = r; devG = g; devB = b;
+    devBri = 100;
+    devLedOn = true;
+    document.getElementById('m-led-status').innerText = 'ON';
+    document.getElementById('dev-rng-bri').value = 100;
+    document.getElementById('dev-lbl-bri').innerText = '100%';
+    document.getElementById('dev-rng-r').value = r;
+    document.getElementById('dev-rng-g').value = g;
+    document.getElementById('dev-rng-b').value = b;
+    document.getElementById('dev-lbl-r').innerText = r;
+    document.getElementById('dev-lbl-g').innerText = g;
+    document.getElementById('dev-lbl-b').innerText = b;
+    const toH = n => { const s = n.toString(16); return s.length === 1 ? '0'+s : s; };
+    document.getElementById('dev-picker').value = `#${toH(r)}${toH(g)}${toH(b)}`;
+    devSendBacklight();
   }
 
   initUI();

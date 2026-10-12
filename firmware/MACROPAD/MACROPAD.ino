@@ -12,6 +12,9 @@
 #include <Update.h>
 #include "esp_sleep.h"
 #include "driver/gpio.h"
+#include "soc/soc.h"
+#include "soc/rtc_cntl_reg.h"
+#include "hal/brownout_hal.h"
 #include "esp_private/brownout.h"
 #include "dashboard_html.h"
 
@@ -171,6 +174,9 @@ const int MAX_BANKS = 4;
 int currentLayer = 1; // currentBank * 4 + currentSlot + 1 (1 to 16)
 
 const int topRowKeyIDs[4] = {1, 2, 3, 4};
+unsigned long topRowPressTime[4] = {0};
+bool topRowHoldActive[4] = {false};
+const unsigned long TOP_ROW_HOLD_THRESHOLD_MS = 190;
 
 struct BankColor {
   uint8_t r, g, b;
@@ -248,6 +254,7 @@ int getHeld3x3UserKey() {
 
 bool fullRefreshNeeded = true;
 bool screenNeedsUpdate = true;
+int cascadeRefreshMode = 0; // 0 = Instant partial (default), 1 = 3-Row sweep cascade, 2 = 9-Cell sequential cascade
 unsigned long screenUpdateScheduledTime = 0;
 String screenMessage = "BOOTING...";
 String gridLabels[9] = {"ACT 1", "ACT 2", "ACT 3", "ACT 4", "ACT 5", "ACT 6", "ACT 7", "ACT 8", "WOL PC"};
@@ -460,8 +467,24 @@ void setKeyLED(int keyID, uint32_t color, int duration = 100) {
   }
 }
 
+uint8_t screenLedR = 180;
+uint8_t screenLedG = 80;
+uint8_t screenLedB = 0;
+uint8_t screenLedBrightness = 100; // 0..100%
+int screenLedAnimMode = 1; // 0=Static, 1=Candle Ember, 2=Zen Breathe, 3=Twin Aurora
+uint8_t screenLedSpeed = 100; // 20..300% (100 = 1.0x normal speed)
+
+uint32_t getScreenLedColor() {
+  if (hasUnreadNotification) return notifColor;
+  if (!displayLedsActive) return strip.Color(0, 0, 0);
+  uint8_t r = ((uint16_t)screenLedR * screenLedBrightness) / 100;
+  uint8_t g = ((uint16_t)screenLedG * screenLedBrightness) / 100;
+  uint8_t b = ((uint16_t)screenLedB * screenLedBrightness) / 100;
+  return strip.Color(r, g, b);
+}
+
 void refreshDisplayLeds() {
-  uint32_t c = displayLedsActive ? strip.Color(255, 255, 255) : strip.Color(0, 0, 0);
+  uint32_t c = getScreenLedColor();
   if (!isScreenFadeActive) {
     strip.setPixelColor(16, c); 
     strip.setPixelColor(17, c); 
@@ -796,19 +819,38 @@ void updateScreen() {
       }
     }
   }
-  display.display(!fullRefreshNeeded);
-  fullRefreshNeeded = false;
+  if (fullRefreshNeeded || isHudActive || isScreenBlackTestActive || screenMessage != "") {
+    display.display(!fullRefreshNeeded);
+    fullRefreshNeeded = false;
+  } else {
+    // Normal grid refresh: cascade animation
+    if (cascadeRefreshMode == 1) {
+      // Option 2: 3-Row Sweep Cascade (~0.9s total)
+      display.displayWindow(0, 0, 200, 77);
+      display.displayWindow(0, 77, 200, 61);
+      display.displayWindow(0, 138, 200, 62);
+    } else if (cascadeRefreshMode == 2) {
+      // Full 9-Cell Sequential "Train Board" Cascade (~2.7s)
+      display.displayWindow(0, 0, 200, 16); // Top Bar
+      for (int r = 0; r < 3; r++) {
+        for (int c = 0; c < 3; c++) {
+          int x = c * 66;
+          int y = 16 + (r * 61);
+          int w = (c == 2) ? 68 : 66;
+          int h = (r == 2) ? 62 : 61;
+          display.displayWindow(x, y, w, h);
+        }
+      }
+    } else {
+      display.display(true); // Instant single-shot partial refresh
+    }
+  }
 
   // Screen update completed: manage screen LEDs based on active state
-  if (hasUnreadNotification || displayLedsActive) {
-    strip.setPixelColor(16, strip.Color(255, 255, 255));
-    strip.setPixelColor(17, strip.Color(255, 255, 255));
-    strip.show();
-  } else {
-    strip.setPixelColor(16, strip.Color(0, 0, 0));
-    strip.setPixelColor(17, strip.Color(0, 0, 0));
-    strip.show();
-  }
+  uint32_t screenC = getScreenLedColor();
+  strip.setPixelColor(16, screenC);
+  strip.setPixelColor(17, screenC);
+  strip.show();
 }
 
 // ==========================================
@@ -894,18 +936,32 @@ void handlePowerManagement() {
   
   if (now - lastBattCheck >= 5000 || lastBattCheck == 0) {
     lastBattCheck = now;
-    cachedVolts = readBatteryVoltage();
+    float newRead = readBatteryVoltage();
+
+    // Fast initial seed, then slow 80/20 EMA filter to reject Wi-Fi TX voltage sag
+    if (cachedVolts == 3.8f && now < 10000) {
+      cachedVolts = newRead;
+    } else {
+      cachedVolts = (cachedVolts * 0.8f) + (newRead * 0.2f);
+    }
   }
   
   if (cachedVolts >= USB_DETECT_THRESHOLD) {
     return; // External USB power: do not sleep
   }
 
-  // Critical Low-Battery Safety Cutoff:
+  // 1. Critical Low-Battery Safety Cutoff:
   // Only enter deep sleep when battery reaches empty safety threshold (3.30V)
   // to protect LiPo cell against over-discharge.
   if (cachedVolts <= LOW_BATTERY_THRESHOLD && cachedVolts > 0.5f) {
     enterDeepSleep(true); // Cutoff with ! LOW BATT SLEEP ! banner
+    return;
+  }
+
+  // 2. Idle Sleep Timeout (10 mins) ONLY if PC Companion is offline
+  if (!stayAwakeMode && !isPcOnline && (now - lastActivityTime >= SLEEP_TIMEOUT)) {
+    addDeviceLog("SYS", "PWR", "Idle timeout (PC offline). Entering deep sleep.");
+    enterDeepSleep(false);
   }
 }
 
@@ -920,11 +976,13 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     return;
   }
 
-  String message;
-  for (unsigned int i = 0; i < length; i++) message += (char)payload[i];
-  
-  JsonDocument doc;
-  if (deserializeJson(doc, message)) return;
+  // Zero-copy in-place deserialization avoiding dynamic String heap fragmentation
+  StaticJsonDocument<2048> doc;
+  DeserializationError err = deserializeJson(doc, payload, length);
+  if (err) {
+    addDeviceLog("ERR", "JSON", err.c_str());
+    return;
+  }
 
   if (doc.containsKey("pc_online")) {
     bool wasOnline = isPcOnline;
@@ -978,12 +1036,15 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     if (millis() >= screenMessageDismissTime) {
       screenMessage = ""; 
     }
-    bool fast = doc.containsKey("fast") && doc["fast"].as<bool>();
-    if (fast || inVoiceCall) {
-      requestScreenUpdate(false, 50); // Fast partial refresh for dynamic voice call & modifier transitions
+    bool forceFull = doc.containsKey("full_refresh") && doc["full_refresh"].as<bool>();
+    if (forceFull) {
+      requestScreenUpdate(true, 50); // Explicit full refresh to clear ghosting
     } else {
-      requestScreenUpdate(true, 50); // New labels/icons -> full refresh to eliminate ghosting
+      requestScreenUpdate(false, 50); // Default: seamless partial refresh without flashing black
     }
+  }
+  if (doc.containsKey("cascade_mode")) {
+    cascadeRefreshMode = doc["cascade_mode"].as<int>();
   }
   if (doc.containsKey("ack")) {
     acknowledgeNotification();
@@ -1235,6 +1296,44 @@ void setupWebServer() {
     server.send(200, "text/plain", stayAwakeMode ? "ON" : "OFF");
   });
 
+  server.on("/api/cascade", HTTP_GET, []() {
+    if (server.hasArg("mode")) {
+      cascadeRefreshMode = server.arg("mode").toInt();
+      addDeviceLog("SYS", "DISP", ("Cascade mode set to " + String(cascadeRefreshMode)).c_str());
+    }
+    server.send(200, "application/json", "{\"cascade_mode\":" + String(cascadeRefreshMode) + "}");
+  });
+
+  server.on("/api/screen_led", HTTP_GET, []() {
+    if (server.hasArg("state")) {
+      String s = server.arg("state");
+      displayLedsActive = (s == "1" || s == "on" || s == "true");
+    }
+    if (server.hasArg("r")) screenLedR = server.arg("r").toInt();
+    if (server.hasArg("g")) screenLedG = server.arg("g").toInt();
+    if (server.hasArg("b")) screenLedB = server.arg("b").toInt();
+    if (server.hasArg("bri")) screenLedBrightness = constrain(server.arg("bri").toInt(), 0, 100);
+    if (server.hasArg("brightness")) screenLedBrightness = constrain(server.arg("brightness").toInt(), 0, 100);
+    if (server.hasArg("anim")) screenLedAnimMode = server.arg("anim").toInt();
+    if (server.hasArg("anim_mode")) screenLedAnimMode = server.arg("anim_mode").toInt();
+    if (server.hasArg("speed")) screenLedSpeed = constrain(server.arg("speed").toInt(), 20, 300);
+    if (server.hasArg("spd")) screenLedSpeed = constrain(server.arg("spd").toInt(), 20, 300);
+    refreshDisplayLeds();
+    server.send(200, "application/json", "{\"screen_led\":" + String(displayLedsActive ? "true" : "false") + 
+      ",\"r\":" + String(screenLedR) + ",\"g\":" + String(screenLedG) + ",\"b\":" + String(screenLedB) + 
+      ",\"brightness\":" + String(screenLedBrightness) + ",\"anim\":" + String(screenLedAnimMode) + 
+      ",\"speed\":" + String(screenLedSpeed) + "}");
+  });
+
+  server.on("/api/wifi_sleep", HTTP_GET, []() {
+    if (server.hasArg("enabled")) {
+      isWifiSleepActive = (server.arg("enabled") == "1" || server.arg("enabled") == "true");
+      WiFi.setSleep(isWifiSleepActive);
+      addDeviceLog("SYS", "PWR", isWifiSleepActive ? "WiFi Modem Sleep enabled" : "WiFi Full Power mode enabled (No sleep)");
+    }
+    server.send(200, "application/json", "{\"wifi_sleep\":" + String(isWifiSleepActive ? "true" : "false") + "}");
+  });
+
   server.on("/update", HTTP_POST, []() {
     server.sendHeader("Connection", "close");
     server.send(200, "text/plain", (Update.hasError()) ? "FAIL" : "OK");
@@ -1248,7 +1347,10 @@ void setupWebServer() {
     strip.clear();
     strip.show();
     setMatrixIdle();
-    delay(200);
+    delay(100);
+    // Disarm hardware BOD in silicon RTC registers across reboot so ROM RF calibration does not abort
+    WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+    delay(100);
     ESP.restart();
   }, []() {
     HTTPUpload& upload = server.upload();
@@ -1279,7 +1381,9 @@ void setupWebServer() {
     strip.clear();
     strip.show();
     setMatrixIdle();
-    delay(200);
+    delay(100);
+    WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+    delay(100);
     ESP.restart();
   });
 
@@ -1297,7 +1401,7 @@ void setupWebServer() {
 void setupNetwork() {
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(isWifiSleepActive); // Enable 802.11 Modem-Sleep by default (wakes automatically on incoming packets)
-  WiFi.setTxPower(WIFI_POWER_15dBm); // Prevents battery voltage brownouts on peak RF bursts
+  WiFi.setTxPower(WIFI_POWER_8_5dBm); // Soft-start RF TX power: prevents battery rail brownout spikes on boot
   WiFi.begin(ssid, password);
   mqttClient.setServer(mqtt_server, 1883);
   mqttClient.setBufferSize(2048); // Allows receiving full layer icon/label payloads (1500+ bytes)
@@ -1754,152 +1858,8 @@ void renderNotificationAnimations(unsigned long now) {
       break;
     }
 
-    // -------------------------------------------------------------------------
-    // 2. RADIAL SONAR RIPPLE / EXPANDING COMET RINGS
-    // -------------------------------------------------------------------------
-    case 2: {
-      float radius = ((float)(t % 1100) / 1100.0f) * 3.6f;
-      for (int r = 0; r < 4; r++) {
-        for (int c = 0; c < 4; c++) {
-          float dr = (float)r - 1.5f;
-          float dc = (float)c - 1.5f;
-          float dist = sqrtf(dr * dr + dc * dc);
-          float ringDist = fabsf(dist - radius);
-          float b = max(0.0f, 1.0f - ringDist * 1.6f);
-          b = b * b;
-          int px = matLed[r][c];
-          strip.setPixelColor(px, strip.Color((uint8_t)(baseR * b), (uint8_t)(baseG * b), (uint8_t)(baseB * b)));
-        }
-      }
-      float edgePing = max(0.0f, 1.0f - fabsf(2.2f - radius) * 1.5f);
-      uint8_t sb = (uint8_t)(50 + 205 * (edgePing * edgePing));
-      strip.setPixelColor(16, strip.Color(sb, sb, sb));
-      strip.setPixelColor(17, strip.Color(sb, sb, sb));
+    default:
       break;
-    }
-
-    // -------------------------------------------------------------------------
-    // 3. CYBERPUNK MATRIX DUAL SCANNER (CROSSHAIR BEAMS)
-    // -------------------------------------------------------------------------
-    case 3: {
-      float scanX = 1.5f + 1.5f * sinf((float)(t % 1500) * (2.0f * PI / 1500.0f));
-      float scanY = 1.5f + 1.5f * cosf((float)(t % 1500) * (2.0f * PI / 1500.0f));
-      for (int r = 0; r < 4; r++) {
-        for (int c = 0; c < 4; c++) {
-          float dist = sqrtf(powf(c - scanX, 2) + powf(r - scanY, 2));
-          float b = max(0.08f, 1.0f - dist * 0.6f);
-          b = b * b;
-          int px = matLed[r][c];
-          strip.setPixelColor(px, strip.Color((uint8_t)(baseR * b), (uint8_t)(baseG * b), (uint8_t)(baseB * b)));
-        }
-      }
-      float leftWeight = max(0.0f, 1.0f - scanX / 3.0f);
-      float rightWeight = max(0.0f, scanX / 3.0f);
-      uint8_t sb1 = (uint8_t)(50 + 205 * leftWeight);
-      uint8_t sb2 = (uint8_t)(50 + 205 * rightWeight);
-      strip.setPixelColor(16, strip.Color(sb1, sb1, sb1));
-      strip.setPixelColor(17, strip.Color(sb2, sb2, sb2));
-      break;
-    }
-
-    // -------------------------------------------------------------------------
-    // 4. RAINBOW CHROMATIC SPECTRUM SWIRL
-    // -------------------------------------------------------------------------
-    case 4: {
-      uint16_t baseHue = (uint16_t)((now * 45) % 65536);
-      for (int r = 0; r < 4; r++) {
-        for (int c = 0; c < 4; c++) {
-          float angle = atan2f((float)r - 1.5f, (float)c - 1.5f);
-          uint16_t hue = baseHue + (uint16_t)(((angle + PI) / (2.0f * PI)) * 65535.0f);
-          int px = matLed[r][c];
-          strip.setPixelColor(px, strip.ColorHSV(hue, 255, 230));
-        }
-      }
-      uint8_t sb = (uint8_t)(180 + 75 * sinf((float)(t % 800) * (2.0f * PI / 800.0f)));
-      strip.setPixelColor(16, strip.Color(sb, sb, sb));
-      strip.setPixelColor(17, strip.Color(sb, sb, sb));
-      break;
-    }
-
-    // -------------------------------------------------------------------------
-    // 5. DIGITAL RAINDROP CASCADE (STARFALL SHIMMER)
-    // -------------------------------------------------------------------------
-    case 5: {
-      for (int c = 0; c < 4; c++) {
-        int colSpeed = 700 + c * 150;
-        float dropHead = ((float)(t % colSpeed) / (float)colSpeed) * 5.0f - 0.5f;
-        for (int r = 0; r < 4; r++) {
-          float dist = (float)r - dropHead;
-          float b = 0.05f;
-          if (dist <= 0 && dist >= -2.2f) {
-            b = max(b, 1.0f + (dist / 2.2f));
-          }
-          int px = matLed[r][c];
-          strip.setPixelColor(px, strip.Color((uint8_t)(baseR * b), (uint8_t)(baseG * b), (uint8_t)(baseB * b)));
-        }
-      }
-      float landingPing = 0.5f + 0.5f * sinf((float)(t % 500) * (2.0f * PI / 500.0f));
-      uint8_t sb = (uint8_t)(70 + 185 * landingPing);
-      strip.setPixelColor(16, strip.Color(sb, sb, sb));
-      strip.setPixelColor(17, strip.Color(sb, sb, sb));
-      break;
-    }
-
-    // -------------------------------------------------------------------------
-    // 6. PERIMETER ORBIT CYCLONE (DUAL HIGH-SPEED NEON COMETS)
-    // -------------------------------------------------------------------------
-    case 6: {
-      const int ringCount = 12;
-      const int ringLeds[12] = {
-        matLed[0][0], matLed[0][1], matLed[0][2], matLed[0][3],
-        matLed[1][3], matLed[2][3], matLed[3][3],
-        matLed[3][2], matLed[3][1], matLed[3][0],
-        matLed[2][0], matLed[1][0]
-      };
-      float headPos1 = ((float)(t % 900) / 900.0f) * 12.0f;
-      float headPos2 = fmodf(headPos1 + 6.0f, 12.0f);
-      for (int i = 0; i < ringCount; i++) {
-        float d1 = fabsf((float)i - headPos1);
-        if (d1 > 6.0f) d1 = 12.0f - d1;
-        float d2 = fabsf((float)i - headPos2);
-        if (d2 > 6.0f) d2 = 12.0f - d2;
-        float b = max(max(0.08f, 1.0f - d1 * 0.4f), max(0.08f, 1.0f - d2 * 0.4f));
-        b = b * b;
-        strip.setPixelColor(ringLeds[i], strip.Color((uint8_t)(baseR * b), (uint8_t)(baseG * b), (uint8_t)(baseB * b)));
-      }
-      float core = 0.2f + 0.3f * sinf((float)(t % 900) * (2.0f * PI / 900.0f));
-      strip.setPixelColor(matLed[1][1], strip.Color((uint8_t)(baseR * core), (uint8_t)(baseG * core), (uint8_t)(baseB * core)));
-      strip.setPixelColor(matLed[1][2], strip.Color((uint8_t)(baseR * core), (uint8_t)(baseG * core), (uint8_t)(baseB * core)));
-      strip.setPixelColor(matLed[2][1], strip.Color((uint8_t)(baseR * core), (uint8_t)(baseG * core), (uint8_t)(baseB * core)));
-      strip.setPixelColor(matLed[2][2], strip.Color((uint8_t)(baseR * core), (uint8_t)(baseG * core), (uint8_t)(baseB * core)));
-      float topPass = max(0.0f, 1.0f - fabsf(0.0f - headPos1) * 0.8f);
-      uint8_t sb = (uint8_t)(60 + 195 * topPass);
-      strip.setPixelColor(16, strip.Color(sb, sb, sb));
-      strip.setPixelColor(17, strip.Color(sb, sb, sb));
-      break;
-    }
-
-    // -------------------------------------------------------------------------
-    // 7. QUAD-CORNER GEOMETRIC CROSSWAVE & SYNCED SCREEN STROBE
-    // -------------------------------------------------------------------------
-    case 7: {
-      float phase = (float)(t % 1000) / 1000.0f * 2.0f * PI;
-      float c1 = 0.5f + 0.5f * sinf(phase);
-      float c2 = 0.5f + 0.5f * cosf(phase);
-      for (int r = 0; r < 4; r++) {
-        for (int c = 0; c < 4; c++) {
-          bool diag1 = (r == c) || (r + c == 3);
-          float b = diag1 ? (0.15f + 0.85f * c1) : (0.15f + 0.85f * c2);
-          int px = matLed[r][c];
-          strip.setPixelColor(px, strip.Color((uint8_t)(baseR * b), (uint8_t)(baseG * b), (uint8_t)(baseB * b)));
-        }
-      }
-      uint8_t sb1 = (uint8_t)(50 + 205 * c1);
-      uint8_t sb2 = (uint8_t)(50 + 205 * c2);
-      strip.setPixelColor(16, strip.Color(sb1, sb1, sb1));
-      strip.setPixelColor(17, strip.Color(sb2, sb2, sb2));
-      break;
-    }
   }
 
   strip.show();
@@ -1909,7 +1869,9 @@ void renderNotificationAnimations(unsigned long now) {
 // MAIN SETUP
 // ==========================================
 void setup() {
-  esp_brownout_disable(); // Properly disables IDF brownout detection (eliminates boot loops from voltage sags)
+  // Clear silicon BOD comparator register immediately upon entering user code
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+  esp_brownout_disable();
   Serial.begin(115200);
   setCpuFrequencyMhz(80); // Reduces CPU power consumption by ~50%
 
@@ -1940,15 +1902,11 @@ void setup() {
   pinMode(BATTERY_PIN, INPUT);
   analogSetAttenuation(ADC_11db); 
 
+  // Keep LEDs dark during cold boot to minimize concurrent rail loading during RF synthesis
   strip.begin();
   strip.setBrightness(100); 
   strip.clear();
-  strip.show(); 
-  if (wokeFromDeepSleep) {
-    startWakeAnimation();
-  } else {
-    startBootAnimation();
-  }
+  strip.show();
 
   SPI.begin(EPD_SCL, -1, EPD_SDA, EPD_CS);
   display.init(115200, !wokeFromDeepSleep, 2, false); 
@@ -1982,8 +1940,52 @@ void setup() {
   Wire.requestFrom(PCF_ENCODERS, 1);
   if (Wire.available()) lastI2cEncState = Wire.read();
 
+  if (wokeFromDeepSleep) {
+    // Scan the matrix to catch the keystroke that woke us up before clearing the latch
+    for (int row = 0; row < 4; row++) {
+      Wire.beginTransmission(PCF_MATRIX);
+      Wire.write(~(1 << row));
+      Wire.endTransmission();
+      Wire.requestFrom(PCF_MATRIX, 1);
+      if (Wire.available()) {
+        byte readData = Wire.read();
+        for (int col = 0; col < 4; col++) {
+          if ((readData & (1 << (col + 4))) == 0) {
+            int mappedCol = 3 - col;
+            int id = keyIDs[row][mappedCol];
+
+            // Queue the action to fire as soon as MQTT connects
+            if (id >= 1 && id <= 4) {
+              int nextLayer = (rtcBank * 4) + (id - 1) + 1;
+              queuePayload("{\"device\":\"macropad\", \"layer\":" + String(nextLayer) + ", \"bank\":" + String(rtcBank + 1) + ", \"slot\":" + String(id) + ", \"action\":\"layer_change\"}");
+            } else if (id == 5) {
+              queuePayload("{\"device\":\"macropad\", \"layer\":" + String(rtcLayer) + ", \"action\":\"light_toggle\"}");
+            } else if (id == 13) {
+              queuePayload("{\"device\":\"macropad\", \"layer\":" + String(rtcLayer) + ", \"action\":\"mic_mute_toggle\"}");
+            } else if (id == 9) {
+              queuePayload("{\"device\":\"macropad\", \"layer\":" + String(rtcLayer) + ", \"action\":\"auto_app_mode\", \"enabled\":true}");
+            } else {
+              int dynIdx = getDynamicIndex(id);
+              if (dynIdx > 0) {
+                queuePayload("{\"device\":\"macropad\", \"layer\":" + String(rtcLayer) + ", \"action\":\"macro\", \"index\":" + String(dynIdx) + ", \"label\":\"wake_action\"}");
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
   setMatrixIdle();
   updateLayerLEDs(true);
+  
+  // Peripherals initialized and stable: trigger animation cleanly
+  if (wokeFromDeepSleep) {
+    startWakeAnimation();
+  } else {
+    startBootAnimation();
+  }
+  
   lastActivityTime = millis();
 }
 
@@ -2085,9 +2087,9 @@ void loop() {
     unsigned long elapsed = now - screenUpdateFadeStart;
     if (elapsed >= SCREEN_FADE_DURATION) {
       isScreenFadeActive = false;
-      uint8_t finalB = displayLedsActive ? 255 : 0;
-      strip.setPixelColor(16, strip.Color(finalB, finalB, finalB));
-      strip.setPixelColor(17, strip.Color(finalB, finalB, finalB));
+      uint32_t finalC = getScreenLedColor();
+      strip.setPixelColor(16, finalC);
+      strip.setPixelColor(17, finalC);
       strip.show();
     } else {
       float factor = 1.0f - ((float)elapsed / (float)SCREEN_FADE_DURATION);
@@ -2095,6 +2097,57 @@ void loop() {
       uint8_t b = (uint8_t)(255.0f * factor * factor);
       strip.setPixelColor(16, strip.Color(b, b, b));
       strip.setPixelColor(17, strip.Color(b, b, b));
+      strip.show();
+    }
+  }
+
+  // --- SUBTLE READING-FRIENDLY BACKLIGHT ANIMATION (PIXELS 16 & 17) ---
+  // Organic motion (Candle / Breathe / Aurora) masks battery Wi-Fi beacon power sag
+  static unsigned long lastBacklightAnimTime = 0;
+  if (displayLedsActive && !isScreenFadeActive && !hasUnreadNotification && screenLedAnimMode > 0) {
+    if (now - lastBacklightAnimTime >= 35) {
+      lastBacklightAnimTime = now;
+
+      uint8_t baseR = ((uint16_t)screenLedR * screenLedBrightness) / 100;
+      uint8_t baseG = ((uint16_t)screenLedG * screenLedBrightness) / 100;
+      uint8_t baseB = ((uint16_t)screenLedB * screenLedBrightness) / 100;
+
+      float factor1 = 1.0f;
+      float factor2 = 1.0f;
+      float spd = (float)screenLedSpeed / 100.0f;
+      if (spd < 0.2f) spd = 0.2f;
+
+      if (screenLedAnimMode == 1) {
+        // Mode 1: Candle Flame / Hearth Flicker (35% to 100% dynamic living flame)
+        float t = (float)now * 0.005f * spd;
+        float wave = 0.45f * sinf(t) + 0.35f * sinf(t * 2.7f) + 0.20f * sinf(t * 6.3f);
+        factor1 = 0.65f + (wave * 0.35f);
+        float wave2 = 0.45f * sinf(t + 2.1f) + 0.35f * sinf((t + 2.1f) * 2.7f) + 0.20f * sinf((t + 2.1f) * 6.3f);
+        factor2 = 0.65f + (wave2 * 0.35f);
+      } else if (screenLedAnimMode == 2) {
+        // Mode 2: Zen Deep Breathe (15% to 100% smooth 3-second cycle)
+        float t = (float)now * 0.0021f * spd;
+        float s = (sinf(t) + 1.0f) * 0.5f;
+        factor1 = 0.15f + (s * 0.85f);
+        factor2 = factor1;
+      } else if (screenLedAnimMode == 3) {
+        // Mode 3: Twin Aurora Wave (15% to 100% alternating top/bottom)
+        float t = (float)now * 0.0025f * spd;
+        float s = (sinf(t) + 1.0f) * 0.5f;
+        factor1 = 0.15f + (s * 0.85f);
+        factor2 = 0.15f + ((1.0f - s) * 0.85f);
+      }
+
+      uint8_t r1 = (uint8_t)constrain((int)(baseR * factor1), 0, 255);
+      uint8_t g1 = (uint8_t)constrain((int)(baseG * factor1), 0, 255);
+      uint8_t b1 = (uint8_t)constrain((int)(baseB * factor1), 0, 255);
+
+      uint8_t r2 = (uint8_t)constrain((int)(baseR * factor2), 0, 255);
+      uint8_t g2 = (uint8_t)constrain((int)(baseG * factor2), 0, 255);
+      uint8_t b2 = (uint8_t)constrain((int)(baseB * factor2), 0, 255);
+
+      strip.setPixelColor(16, strip.Color(r1, g1, b1));
+      strip.setPixelColor(17, strip.Color(r2, g2, b2));
       strip.show();
     }
   }
@@ -2345,11 +2398,12 @@ void loop() {
                 acknowledgeNotification();
               }
               
-              // Top Row: Quick Layer Select 1-4
-              if (id == 1) selectLayerSlot(0);
-              else if (id == 2) selectLayerSlot(1);
-              else if (id == 3) selectLayerSlot(2);
-              else if (id == 4) selectLayerSlot(3);
+              // Top Row Keys 1-4: Mod-Tap handling (Hold = Modifier, Tap = Select Slot)
+              if (id >= 1 && id <= 4) {
+                int slotIdx = id - 1;
+                topRowPressTime[slotIdx] = now;
+                topRowHoldActive[slotIdx] = false;
+              }
               
               // Fixed Key 9 in Left Column -> Short Tap = Mode Cycle, Long Hold = Status HUD Peek
               else if (id == 9) {
@@ -2581,6 +2635,31 @@ void loop() {
       powerKeyHoldTriggered = false;
     }
 
+    // Evaluate hold states and releases for Top-Row Keys 1-4 (Mod-Tap)
+    for (int s = 0; s < 4; s++) {
+      int keyId = topRowKeyIDs[s];
+      if (currentScanState[keyId]) {
+        if (!topRowHoldActive[s] && topRowPressTime[s] > 0 && (now - topRowPressTime[s] >= TOP_ROW_HOLD_THRESHOLD_MS)) {
+          topRowHoldActive[s] = true;
+          sendPayload("{\"device\":\"macropad\", \"action\":\"top_mod_hold\", \"slot\":" + String(s + 1) + "}");
+          addDeviceLog("INP", "TMOD", ("Top Mod Hold: Slot " + String(s + 1)).c_str());
+          setKeyLED(keyId, strip.Color(255, 0, 150), 300);
+        }
+      } else if (lastState[keyId] && !currentScanState[keyId]) {
+        // Key released
+        if (topRowHoldActive[s]) {
+          sendPayload("{\"device\":\"macropad\", \"action\":\"top_mod_release\", \"slot\":" + String(s + 1) + "}");
+          addDeviceLog("INP", "TMOD", ("Top Mod Release: Slot " + String(s + 1)).c_str());
+          setKeyLED(keyId, strip.Color(0, 0, 0), 1);
+        } else if (topRowPressTime[s] > 0) {
+          // Short tap (< 190ms): switch layer slot
+          selectLayerSlot(s);
+        }
+        topRowPressTime[s] = 0;
+        topRowHoldActive[s] = false;
+      }
+    }
+
     // Check 3x3 dynamic keys under modifier for long-press save and short-tap recall,
     // AND check keys with hold_mask for radial menu / hold actions (macro_hold & macro_release)
     for (int k = 1; k <= 9; k++) {
@@ -2745,8 +2824,14 @@ void loop() {
       }
     } else if (key9PressTime > 0 && (now - key9LastSeenTime > 45)) {
       if (!key9LongTriggered) {
-        // Physical Key 9 toggles Status/Battery HUD peek (mode switching handled in Web Dashboard)
-        toggleHud();
+        // Short Tap: Toggle Auto-App Mode vs Manual Mode
+        isAutoAppMode = !isAutoAppMode;
+        deviceMode = isAutoAppMode ? MODE_AUTO : MODE_MANUAL;
+        rtcDeviceMode = (int)deviceMode;
+        updateLayerLEDs(true);
+        sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"auto_app_mode\", \"enabled\":" + (isAutoAppMode ? "true" : "false") + "}");
+        addDeviceLog("INP", "MODE", isAutoAppMode ? "Key 9: Auto-App Mode ON" : "Key 9: Manual Mode");
+        setKeyLED(9, isAutoAppMode ? strip.Color(0, 255, 120) : strip.Color(255, 80, 0), 200);
       }
       key9PressTime = 0;
       key9LongTriggered = false;
@@ -2829,8 +2914,9 @@ void loop() {
     addDeviceLog("SYS", "HUD", "HUD auto-dismissed");
   }
 
-  // Never freeze the CPU while keys/encoders are active or within 800ms of any user action
-  if (screenNeedsUpdate && (now >= screenUpdateScheduledTime) && (now - lastActivityTime >= 800)) {
+  // Never freeze the CPU while keys/encoders are active or within 400ms of any user action
+  bool inputsQuiet = (!isPollingMatrix && enc1_raw_steps == 0 && (now - lastActivityTime >= 400));
+  if (screenNeedsUpdate && (now >= screenUpdateScheduledTime) && inputsQuiet) {
     updateScreen();
     screenNeedsUpdate = false;
   }
