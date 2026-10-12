@@ -1,6 +1,6 @@
 # MacroPad: Wireless ESP32-C3 E-Ink Mechanical Macro Controller
 
-A custom, battery-powered 16-key mechanical macropad featuring an ultra-low-power **1.54" E-Ink display**, **18 addressable RGB NeoPixels**, **3 rotary encoders**, and seamless **MQTT integration** with Home Assistant and Windows desktop audio control.
+A custom, battery-powered 16-key mechanical macropad featuring an ultra-low-power **1.54" E-Ink display**, **18 addressable RGB NeoPixels**, **3 rotary encoders**, and seamless **MQTT integration** with Windows, Autodesk Fusion 360, Discord, and Home Assistant.
 
 ---
 
@@ -23,17 +23,18 @@ A custom, battery-powered 16-key mechanical macropad featuring an ultra-low-powe
             v                                                        v
 +-----------------------+                                +-----------------------+
 |  Home Assistant (HA)  |                                |   Windows PC Bridge   |
-|  Automations, Scenes, |                                |  pycaw Audio Control, |
-|  Room Lights, Toggles |                                |  Discord Mute, Hotkeys|
-+-----------------------+                                +-----------------------+
-            ^                                                        ^
-            |                                                        |
-            +------------------+                 +-------------------+
-                               |                 |
-                      +--------+-----------------+--------+
-                      |       Pi / PC Web Dashboard       |
-                      |    FastAPI + WebSockets (Port 5000)|
-                      +-----------------------------------+
+|  Automations, Scenes, |                                |  - pycaw & Discord RPC|
+|  Room Lights, Toggles |                                |  - Auto-App Watcher   |
++-----------------------+                                |  - Qt Radial Overlay  |
+            ^                                            |  - Fusion 360 Bridge  |
+            |                                            +-----------------------+
+            +------------------+                                     |
+                               |                                     v
+                      +--------+-----------------+       +-----------------------+
+                      |       Pi Unified Studio   |       |  Autodesk Fusion 360  |
+                      |   Layer Store & Icon Mgr |       |  Native Python Add-in |
+                      |    FastAPI (Port 5000)   |       +-----------------------+
+                      +--------------------------+
 ```
 
 ---
@@ -45,23 +46,53 @@ MACROPAD/
 ├── firmware/
 │   └── MACROPAD/
 │       ├── MACROPAD.ino           # ESP32-C3 core firmware (I2C, E-Ink, NeoPixels, MQTT, OTA)
-│       └── dashboard_html.h       # On-device embedded HTTP diagnostics & OTA web server
+│       └── dashboard_html.h       # On-device embedded HTTP diagnostics, mode switch & OTA web server
 ├── pc_app/
-│   ├── macropad_bridge.py        # Windows audio controller (pycaw, Discord mic mute, volume)
-│   ├── start_audio_bridge.bat    # 1-click Windows runner
+│   ├── macropad_bridge.py        # Windows companion bridge (pycaw, Discord RPC, Auto-App watcher)
+│   ├── discord_rpc.py            # Local Discord Voice RPC IPC client (mute/deafen/channel sync)
+│   ├── radial_menu.py            # Transparent Qt on-screen radial pie menus (3Dconnexion-style)
+│   ├── notification_bridge.py    # Windows toast notification interceptor (WhatsApp VIP, Phone Link)
+│   ├── start_audio_bridge.bat    # 1-click Windows bridge runner
+│   ├── install_startup.bat       # Configures silent Windows background startup via pythonw
 │   └── requirements.txt          # Python dependencies for Windows bridge
+├── fusion_addin/
+│   └── MacroPadFusionBridge/
+│       ├── MacroPadFusionBridge.py       # Native Fusion 360 Python API command bridge
+│       └── MacroPadFusionBridge.manifest # Autodesk Fusion Add-In manifest
 ├── pi_app/
-│   ├── app.py                    # Real-time WebSocket terminal & diagnostic web dashboard
-│   ├── start_dashboard.bat       # Windows runner
-│   ├── start_dashboard.sh        # Linux / Raspberry Pi runner
-│   ├── macropad-dashboard.service# Systemd service unit for 24/7 background running on Pi
-│   └── requirements.txt          # Python dependencies for dashboard server
+│   ├── app.py                    # Unified Studio web server (FastAPI, WebSockets, REST APIs)
+│   ├── studio_ui.py              # Visual Layer Editor, Icon Picker, and App Rules Studio
+│   ├── layer_manager.py          # Dynamic 16-layer store and rule matcher
+│   ├── layers_store.json         # Persistent JSON layer configuration store
+│   ├── icon_library.py           # 24x24 1-bit monochrome bitmap icon compiler
+│   └── macropad-dashboard.service# Systemd service unit for 24/7 background running on Pi
 ├── home_assistant/
 │   ├── ha_configuration.yaml     # MQTT sensors & device discovery
 │   ├── ha_automations.yaml       # Layer and macro automations
 │   └── ha_scripts.yaml           # Preset execution scripts
-└── .gitignore                    # Build artifact and temporary file exclusions
+├── ota_upload.py                 # Automated 1-click Wi-Fi OTA firmware flashing utility
+├── ICON_SPEC_MANIFEST.md         # Bitmap specifications for E-Ink icons
+└── .gitignore                    # Build artifacts, tokens, logs, and database exclusions
 ```
+
+---
+
+## 🕹️ Operating Modes
+
+The MacroPad supports three distinct operating modes, selectable from the **Unified Studio** (`http://192.168.1.62:5000/`) or the **On-Device Web Dashboard** (`http://192.168.1.58/`):
+
+1. **🤖 Auto-App Mode (`automode`)** *(Default)*:
+   - The PC bridge monitors the focused Windows application in real-time.
+   - When you switch to a tracked application, the MacroPad automatically switches layers:
+     - **Autodesk Fusion 360** $\rightarrow$ Layer 13 (Sketch, Extrude, Revolve, Plane, Inspect, etc.)
+     - **Autodesk AutoCAD** $\rightarrow$ Layer 5 (Draw, Modify, Layers, Annotate)
+     - **Adobe Photoshop** $\rightarrow$ Layer 14 (Tools, Brushes, Layers, Adjustments)
+     - **Discord** $\rightarrow$ Layer 2 (Voice Call Member Grid)
+   - **Untracked Applications**: Displays **Universal Controls** (App name on Cell 1, plus `COPY`, `PASTE`, `CUT`, `UNDO`, `REDO`, `FIND`, `SAVE`, and `ESC`).
+2. **🎛️ Manual Mode (`manual`)**:
+   - Disables automatic switching. The pad operates statically across 16 layers (4 Banks $\times$ 4 Slots).
+3. **🛠️ Debug Mode (`debug`)**:
+   - Dedicated hardware diagnostics mode: screen test, battery ADC, stay-awake toggle, modem sleep, deep sleep, and Wake-on-LAN testing.
 
 ---
 
@@ -86,22 +117,39 @@ MACROPAD/
 
 ### Key Matrix Layout (4×4 PCF8574 Expander)
 - **Top Row (Keys 1–4)**: Quick Layer Slots (1 to 4) within the active Bank.
-- **Key 5**: Room Light Toggle (Tap) / Modifier Hold (`MOD`).
-- **Key 9**: Fixed system function.
-- **Key 13**: Discord Mic Mute (Short tap) / App Audio Target Modifier (Hold $\ge 500\text{ms}$).
+- **Key 5**: Room Light Toggle (Tap) / Modifier Hold (`MOD` - magenta presets).
+- **Key 9**: **Status & Battery HUD Peek**: Tap or hold ($\ge 420\text{ms}$) to peek live battery voltage, Wi-Fi RSSI, and layer info.
+- **Key 13**: **Discord Mic Mute / Audio Modifier**: Short tap toggles microphone mute; holding enables per-user Discord volume controls.
 - **Keys 6–8, 10–12, 14–16**: 3×3 Dynamic Macro Grid mirroring the E-Ink display labels.
 
 ### Rotary Encoders
 1. **HW Encoder (Top Right - GPIO 6/7/10)**:
-   - Rotate: Master Volume Up / Down (with acceleration).
-   - Click: Reset Master Volume to 50%.
-2. **Encoder 2 (Top Left - PCF8574)**:
-   - Rotate: Target App Volume (when audio modifier held) / Layer cycle.
-   - Click: Cycle active target application.
-   - Long Press ($\ge 500\text{ms}$): Quick Return to Bank 1 Layer 1 (`HOME`).
-3. **Encoder 1 (Bottom Left - PCF8574)**:
-   - Rotate: Discord Volume Up / Down.
-   - Click: Reset Discord Volume to 100%.
+   - Rotate: Master System Volume Up / Down.
+   - Click: Reset Master Volume to 80%.
+2. **Encoder 2 (Bottom Left - PCF8574)**:
+   - Rotate: Selected Discord Call Member Volume (in voice call) / Application Volume.
+   - Click: Mute / Unmute selected voice member.
+3. **Encoder 3 (Top Left - PCF8574)**:
+   - Rotate: Discord Master Volume / CAD Scroll.
+   - Click: Reset Discord Master Volume to 80%.
+
+---
+
+## 🎙️ Dynamic Discord Voice Call Controller
+
+When connected to Discord via local IPC RPC:
+- When a voice call is active, Keys 1–8 automatically populate with **live call members**, their volumes (e.g. `60%`), and mute states.
+- **Tap Member Key**: Sets the member as the active adjustment target (`>` indicator and popup toast).
+- **Turn Bottom-Left Encoder**: Smoothly adjusts that targeted member's volume in Discord (0% to 200%).
+- **Long Press Member Key ($\ge 250\text{ms}$)**: Toggles local mute for that specific member.
+- **Key 9 (Cell 9)**: Toggles Discord Deafen (`DEAFEN CALL` / `UNDEAF CALL`).
+
+---
+
+## 📐 Autodesk Fusion 360 & Radial Menus
+
+- **Native Fusion Add-In**: Connects directly to Autodesk Fusion 360 via `MacroPadFusionBridge.py`, bypassing unreliable simulated keystrokes for instant tool invocation (Sketch, Extrude, Revolve, Sweep, Loft, Fillet, Hole, etc.).
+- **3Dconnexion-Style Radial Menus**: Holding any CAD macro key ($\ge 250\text{ms}$) displays an on-screen semi-transparent radial pie menu centered around your cursor with live tool selection.
 
 ---
 
@@ -110,68 +158,47 @@ MACROPAD/
 The pad is powered by a **4000 mAh Li-Po single-cell** battery.
 
 - **Awake Consumption**: $\approx 45\text{–}65\,\text{mA}$ with NeoPixels dimmed.
-- **Light Sleep Mode**: Triggers after **10 minutes** of idle inactivity. Powers down display rails and drops current to $\approx 3.5\,\text{mA}$.
+- **Light Sleep Mode**: Triggers after **10 minutes** of idle inactivity. Drops current to $\approx 3.5\,\text{mA}$.
 - **Deep Sleep Protection**: Automatically engages when battery voltage drops below **`3.30V`**.
-  - E-Ink updates to `! LOW BATT SLEEP !` (image persists indefinitely at $0.0\,\mu\text{A}$).
-  - All NeoPixels shut off.
-  - Radio powers down.
-  - ESP32-C3 enters deep sleep ($\approx 10\text{–}15\,\mu\text{A}$).
-  - Wakes up via matrix key press (`MATRIX_INT` GPIO 3) or by plugging in USB power ($\ge 4.3\text{V}$).
-- **Estimated Battery Life**: ~18 to 22 days of regular daily desktop use on a single charge.
+  - E-Ink displays `! LOW BATT SLEEP !` (image persists indefinitely at $0.0\,\mu\text{A}$).
+  - All NeoPixels shut off; radio powers down ($\approx 10\text{–}15\,\mu\text{A}$).
+  - Wakes up via any matrix key press (`MATRIX_INT` GPIO 3) or by plugging in USB-C power ($\ge 4.3\text{V}$).
+- **Estimated Battery Life**: ~18 to 25 days of regular desktop use on a single charge.
 
 ---
 
 ## 🚀 Getting Started
 
-### 1. Firmware (`firmware/MACROPAD`)
+### 1. Firmware OTA Flash (`ota_upload.py`)
 
-#### Using Arduino CLI:
+Firmware can be compiled and flashed over Wi-Fi without unplugging the device:
 ```bash
 # Compile firmware
-arduino-cli compile --fqbn esp32:esp32:esp32c3 firmware/MACROPAD
+arduino-cli compile --fqbn esp32:esp32:esp32c3 firmware/MACROPAD --output-dir build
 
-# Flash over USB (replace COM7 with your port)
-arduino-cli upload -p COM7 --fqbn esp32:esp32:esp32c3 firmware/MACROPAD
+# 1-click Wi-Fi OTA Flash
+python ota_upload.py
 ```
 
-#### Wireless HTTP OTA Update:
-Once connected to your local network, updates can be flashed over Wi-Fi without plugging in USB:
-```bash
-curl -F "update=@firmware/MACROPAD/build/MACROPAD.ino.bin" http://<DEVICE_IP>/update
-```
-
----
-
-### 2. PC Windows Audio Bridge (`pc_app`)
-
-Provides native Windows Master Volume, Discord Mic Muting, and individual application volume control via `pycaw`.
+### 2. PC Companion Bridge (`pc_app`)
 
 ```bash
 cd pc_app
 pip install -r requirements.txt
 python macropad_bridge.py
-# Or double-click start_audio_bridge.bat
+# Or run pc_app/install_startup.bat to run silently in background on boot
 ```
 
-#### Run on Windows Startup:
-To run automatically in the background on system boot:
-- Run [install_startup.bat](file:///C:/Users/Uzzo/Desktop/MACROPAD/pc_app/install_startup.bat) (uses `pythonw.exe` for silent background execution).
-- To disable: Run [uninstall_startup.bat](file:///C:/Users/Uzzo/Desktop/MACROPAD/pc_app/uninstall_startup.bat).
-
----
-
-### 3. Raspberry Pi Web Dashboard (`pi_app`)
-
-Real-time browser-based telemetry terminal and device debugger using FastAPI and WebSockets.
+### 3. Raspberry Pi Studio Dashboard (`pi_app`)
 
 ```bash
 cd pi_app
 pip install -r requirements.txt
 python app.py
-# Or run bash start_dashboard.sh
+# Access Web Studio at http://192.168.1.62:5000/
 ```
 
-To install as a permanent system service on Raspberry Pi:
+To enable as a permanent system service on Raspberry Pi:
 ```bash
 sudo cp pi_app/macropad-dashboard.service /etc/systemd/system/
 sudo systemctl daemon-reload
@@ -180,34 +207,14 @@ sudo systemctl enable --now macropad-dashboard.service
 
 ---
 
-### 4. Home Assistant Integration (`home_assistant`)
-
-Copy the YAML configurations into your Home Assistant `/config/` directory:
-- `ha_configuration.yaml`: Sets up MQTT device status sensor, battery monitor, and uptime.
-- `ha_automations.yaml`: Handles incoming matrix button clicks and encoder events.
-- `ha_scripts.yaml`: Provides helper scripts for screen label updates and preset changing.
-
----
-
 ## 📡 MQTT Topic Specification
 
 | Topic | Payload Type | Description |
 | :--- | :--- | :--- |
 | `macropad/input` | JSON | Published on key press, release, encoder turn, or click |
-| `macropad/status` | JSON | Periodic heartbeat (battery voltage, RSSI, heap, layer) |
-| `macropad/display` | JSON | Subscribe topic for updating 3×3 screen labels or popups |
-| `macropad/debug` | JSON | Real-time device ring buffer debug logs |
-
-### Example Input Payload:
-```json
-{
-  "device": "macropad",
-  "layer": 1,
-  "action": "macro",
-  "index": 1,
-  "label": "ACT 1"
-}
-```
+| `macropad/status` | JSON | Periodic heartbeat (battery voltage, RSSI, heap, layer, mode) |
+| `macropad/display` | JSON | Subscribe topic for updating 3×3 screen labels, icons, or popups |
+| `macropad/config_sync` | JSON | Broadcast topic for live layer & app rule synchronization |
 
 ---
 
