@@ -549,6 +549,7 @@ def on_mqtt_message(client, userdata, msg):
         exe = payload.get("exe", "")
         title = payload.get("title", "")
         device_state["pc_bridge_online"] = True
+        device_state["pc_bridge_last_seen"] = time.time()
         device_state["focused_app_exe"] = exe
         device_state["focused_app_title"] = title
         rule = layer_manager.match_app_rule(exe, title)
@@ -615,6 +616,15 @@ def liveness_watchdog():
             m = int((elapsed % 3600) // 60)
             benchmark_state["elapsed_str"] = f"{h}h {m}m" if h > 0 else f"{m}m"
             benchmark_state["computed_mah"] = round(hours * benchmark_state["current_ma"], 1)
+
+        # Check PC Companion timeout
+        last_pc = device_state.get("pc_bridge_last_seen", 0)
+        if device_state.get("pc_bridge_online") and (now - last_pc > 16):
+            device_state["pc_bridge_online"] = False
+            device_state["focused_app_exe"] = ""
+            device_state["focused_app_title"] = ""
+            device_state["active_app_rule"] = ""
+            broadcast_state()
 
         if last > 0 and (now - last > 75) and curr_state not in ("deep_sleeping", "offline"):
             device_state["state"] = "offline"

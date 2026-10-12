@@ -250,7 +250,7 @@ bool fullRefreshNeeded = true;
 bool screenNeedsUpdate = true;
 unsigned long screenUpdateScheduledTime = 0;
 String screenMessage = "BOOTING...";
-String gridLabels[9] = {"ACT 1", "ACT 2", "ACT 3", "ACT 4", "ACT 5", "ACT 6", "LT SLP", "SLEEP", "WOL PC"};
+String gridLabels[9] = {"ACT 1", "ACT 2", "ACT 3", "ACT 4", "ACT 5", "ACT 6", "ACT 7", "ACT 8", "WOL PC"};
 uint8_t gridIconBitmaps[9][72]; // 24x24 1-bit monochrome bitmaps (3 bytes/row * 24 rows = 72 bytes)
 bool hasGridIcon[9] = {false};
 uint16_t currentHoldMask = 0;   // Bit mask (bits 0..8) of cells that have hold / radial menu actions
@@ -262,7 +262,7 @@ bool isHudActive = false;
 unsigned long hudAutoDismissTime = 0;
 bool isScreenBlackTestActive = false;
 
-// Layer 4 ACT 9 Power Timers (Shutdown & Restart)
+// PC Power & Wake-on-LAN Timers (Shutdown & Restart)
 enum PowerTimerType {
   PWR_TIMER_NONE = 0,
   PWR_TIMER_SHUTDOWN = 1,
@@ -272,17 +272,29 @@ PowerTimerType activePowerTimer = PWR_TIMER_NONE;
 unsigned long powerTimerStartTime = 0;
 const unsigned long POWER_TIMER_DURATION_MS = 20000; // 20-second countdown timer
 
-unsigned long layer4Act9PressStartTime = 0;
-bool layer4Act9HoldTriggered = false;
-int layer4Act9TapCount = 0;
-unsigned long layer4Act9WindowStartTime = 0;
-const unsigned long LAYER4_ACT9_HOLD_MS = 4000;    // 4 seconds hold -> Shutdown timer
-const unsigned long LAYER4_ACT9_WINDOW_MS = 5000;  // 4 taps in < 5 seconds -> Restart timer
+unsigned long powerKeyPressStartTime = 0;
+bool powerKeyHoldTriggered = false;
+int powerKeyTapCount = 0;
+unsigned long powerKeyWindowStartTime = 0;
+const unsigned long POWER_KEY_HOLD_MS = 4000;    // 4 seconds hold -> Shutdown timer
+const unsigned long POWER_KEY_WINDOW_MS = 5000;  // 4 taps in < 5 seconds -> Restart timer
+
+bool isPcOnline = false;
+unsigned long lastPcOnlineTime = 0;
+const unsigned long PC_ONLINE_TIMEOUT_MS = 15000; // 15 seconds without PC heartbeat -> marked offline
+
 
 void requestScreenUpdate(bool fullRefresh = false, unsigned long delayMs = 300) {
   if (fullRefresh) fullRefreshNeeded = true;
   screenNeedsUpdate = true;
   screenUpdateScheduledTime = millis() + delayMs;
+}
+
+void updatePowerKeyLabel() {
+  if (currentLayer == 1) {
+    gridLabels[8] = isPcOnline ? "POWER" : "WOL PC";
+    requestScreenUpdate(true, 50);
+  }
 }
 
 // ==========================================
@@ -898,11 +910,32 @@ void handlePowerManagement() {
 }
 
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
+  if (strcmp(topic, "macropad/pc_telemetry") == 0) {
+    bool wasOnline = isPcOnline;
+    isPcOnline = true;
+    lastPcOnlineTime = millis();
+    if (!wasOnline) {
+      updatePowerKeyLabel();
+    }
+    return;
+  }
+
   String message;
   for (unsigned int i = 0; i < length; i++) message += (char)payload[i];
   
   JsonDocument doc;
   if (deserializeJson(doc, message)) return;
+
+  if (doc.containsKey("pc_online")) {
+    bool wasOnline = isPcOnline;
+    isPcOnline = doc["pc_online"].as<bool>();
+    if (isPcOnline) {
+      lastPcOnlineTime = millis();
+    }
+    if (wasOnline != isPcOnline) {
+      updatePowerKeyLabel();
+    }
+  }
 
   if (doc.containsKey("in_call")) {
     inVoiceCall = doc["in_call"].as<bool>();
@@ -911,6 +944,9 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   if (doc["labels"].is<JsonArray>()) {
     JsonArray newLabels = doc["labels"].as<JsonArray>();
     for (size_t i = 0; i < 9 && i < newLabels.size(); i++) gridLabels[i] = newLabels[i].as<String>();
+    if (currentLayer == 1) {
+      gridLabels[8] = isPcOnline ? "POWER" : "WOL PC";
+    }
     
     // Parse 24x24 monochrome bitmap icons (144 hex characters = 72 bytes)
     if (doc["icons"].is<JsonArray>()) {
@@ -1288,6 +1324,7 @@ void handleNetwork() {
       lastReconnectAttempt = now;
       if (WiFi.status() == WL_CONNECTED && mqttClient.connect("C3_MacroPad")) {
         mqttClient.subscribe(mqtt_topic_sub);
+        mqttClient.subscribe("macropad/pc_telemetry");
         flushMqttQueue();
         if (isFirstMqttConnect) {
           isFirstMqttConnect = false;
@@ -1447,9 +1484,9 @@ void selectLayerSlot(int slot) {
   rtcSlot = currentSlot;
   rtcLayer = currentLayer;
   if (currentLayer == 1) {
-    gridLabels[6] = "LT SLP";
-    gridLabels[7] = "SLEEP";
-    gridLabels[8] = "WOL PC";
+    gridLabels[6] = "ACT 7";
+    gridLabels[7] = "ACT 8";
+    gridLabels[8] = isPcOnline ? "POWER" : "WOL PC";
   } else {
     gridLabels[6] = "ACT 7";
     gridLabels[7] = "ACT 8";
@@ -1474,9 +1511,9 @@ void cycleBank() {
   rtcSlot = currentSlot;
   rtcLayer = currentLayer;
   if (currentLayer == 1) {
-    gridLabels[6] = "LT SLP";
-    gridLabels[7] = "SLEEP";
-    gridLabels[8] = "WOL PC";
+    gridLabels[6] = "ACT 7";
+    gridLabels[7] = "ACT 8";
+    gridLabels[8] = isPcOnline ? "POWER" : "WOL PC";
   } else {
     gridLabels[6] = "ACT 7";
     gridLabels[7] = "ACT 8";
@@ -1498,9 +1535,9 @@ void resetToB1L1() {
   currentBank = 0;
   currentSlot = 0;
   currentLayer = 1;
-  gridLabels[6] = "LT SLP";
-  gridLabels[7] = "SLEEP";
-  gridLabels[8] = "WOL PC";
+  gridLabels[6] = "ACT 7";
+  gridLabels[7] = "ACT 8";
+  gridLabels[8] = isPcOnline ? "POWER" : "WOL PC";
   rtcBank = 0;
   rtcSlot = 0;
   rtcLayer = 1;
@@ -2422,47 +2459,59 @@ void loop() {
                       }
                     } else {
                       // MODE_AUTO and MODE_MANUAL: completely normal layer actions
-                      if (currentLayer == 4 && dynIdx == 9) {
+                      if ((currentLayer == 4 || (currentLayer == 1 && isPcOnline)) && dynIdx == 9) {
                         if (activePowerTimer != PWR_TIMER_NONE) {
                           String prevType = (activePowerTimer == PWR_TIMER_SHUTDOWN) ? "SHUTDOWN" : "RESTART";
                           activePowerTimer = PWR_TIMER_NONE;
                           screenMessage = "CANCELLED\n" + prevType + " ABORT";
                           screenMessageDismissTime = millis() + 2500;
                           requestScreenUpdate(false, 50);
-                          sendPayload("{\"device\":\"macropad\", \"layer\":4, \"action\":\"power_timer_cancel\"}");
+                          sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"power_timer_cancel\"}");
                           addDeviceLog("SYS", "PWR", "Power timer cancelled by user");
                           setKeyLED(id, strip.Color(0, 255, 100), 400);
-                          layer4Act9TapCount = 0;
-                          layer4Act9PressStartTime = 0;
-                          layer4Act9HoldTriggered = false;
+                          powerKeyTapCount = 0;
+                          powerKeyPressStartTime = 0;
+                          powerKeyHoldTriggered = false;
                         } else {
-                          layer4Act9PressStartTime = now;
-                          layer4Act9HoldTriggered = false;
-                          if (now - layer4Act9WindowStartTime > LAYER4_ACT9_WINDOW_MS) {
-                            layer4Act9TapCount = 1;
-                            layer4Act9WindowStartTime = now;
+                          powerKeyPressStartTime = now;
+                          powerKeyHoldTriggered = false;
+                          if (now - powerKeyWindowStartTime > POWER_KEY_WINDOW_MS) {
+                            powerKeyTapCount = 1;
+                            powerKeyWindowStartTime = now;
                           } else {
-                            layer4Act9TapCount++;
+                            powerKeyTapCount++;
                           }
 
-                          if (layer4Act9TapCount >= 4) {
+                          if (powerKeyTapCount >= 4) {
                             activePowerTimer = PWR_TIMER_RESTART;
                             powerTimerStartTime = now;
-                            screenMessage = "RESTART IN 20s\nTAP ACT9: CANCEL";
+                            screenMessage = "RESTART IN 20s\nTAP KEY: CANCEL";
                             screenMessageDismissTime = now + POWER_TIMER_DURATION_MS;
                             requestScreenUpdate(false, 50);
-                            sendPayload("{\"device\":\"macropad\", \"layer\":4, \"action\":\"restart_timer_start\", \"duration\":20}");
+                            sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"restart_timer_start\", \"duration\":20}");
                             addDeviceLog("SYS", "PWR", "Restart timer started (4 taps in <5s)");
                             setKeyLED(id, strip.Color(255, 140, 0), 1000);
-                            layer4Act9TapCount = 0;
-                            layer4Act9PressStartTime = 0;
-                            layer4Act9HoldTriggered = true;
+                            powerKeyTapCount = 0;
+                            powerKeyPressStartTime = 0;
+                            powerKeyHoldTriggered = true;
                           } else {
                             setKeyLED(id, strip.Color(0, 255, 0), 100);
-                            sendPayload("{\"device\":\"macropad\", \"layer\":4, \"action\":\"macro\", \"index\":9, \"label\":\"ACT 9\", \"tap_count\":" + String(layer4Act9TapCount) + "}");
-                            addDeviceLog("INP", "MACRO", ("Key #9 (ACT 9, Tap " + String(layer4Act9TapCount) + "/4)").c_str());
+                            screenMessage = "PWR: HOLD 4s=OFF\nTAP " + String(powerKeyTapCount) + "/4=RESTART";
+                            screenMessageDismissTime = millis() + 1500;
+                            requestScreenUpdate(false, 50);
+                            sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"macro\", \"index\":9, \"label\":\"POWER\", \"tap_count\":" + String(powerKeyTapCount) + "}");
+                            addDeviceLog("INP", "MACRO", ("Key #9 (POWER, Tap " + String(powerKeyTapCount) + "/4)").c_str());
                           }
                         }
+                      } else if (currentLayer == 1 && dynIdx == 9 && !isPcOnline) {
+                        // PC Companion is OFF -> Standalone Hardware WOL
+                        sendWakeOnLan("d4:93:90:3b:f0:89");
+                        screenMessage = "WOL PC:\nSENT MAGIC PKT";
+                        screenMessageDismissTime = millis() + 2500;
+                        requestScreenUpdate(false, 50);
+                        setKeyLED(id, strip.Color(0, 255, 200), 600);
+                        sendPayload("{\"device\":\"macropad\", \"layer\":1, \"action\":\"wakeonlan\", \"mac\":\"d4:93:90:3b:f0:89\"}");
+                        addDeviceLog("INP", "WOL", "Sent Wake-on-LAN to d4:93:90:3b:f0:89");
                       } else {
                         bool isHoldKey = (currentHoldMask & (1 << (dynIdx - 1))) != 0;
                         if (isHoldKey) {
@@ -2500,25 +2549,25 @@ void loop() {
       }
     }
 
-    // Check Layer 4 ACT 9 (Key 16) for 4-second hold -> SHUTDOWN TIMER
-    if (currentLayer == 4 && currentScanState[16] && !isModifierHeld && !isAudioModifierHeld) {
-      if (!layer4Act9HoldTriggered && layer4Act9PressStartTime > 0 && activePowerTimer == PWR_TIMER_NONE) {
-        if (now - layer4Act9PressStartTime >= LAYER4_ACT9_HOLD_MS) {
-          layer4Act9HoldTriggered = true;
+    // Check Key 16 for 4-second hold -> SHUTDOWN TIMER (Layer 4, or Layer 1 with PC Companion online)
+    if ((currentLayer == 4 || (currentLayer == 1 && isPcOnline)) && currentScanState[16] && !isModifierHeld && !isAudioModifierHeld) {
+      if (!powerKeyHoldTriggered && powerKeyPressStartTime > 0 && activePowerTimer == PWR_TIMER_NONE) {
+        if (now - powerKeyPressStartTime >= POWER_KEY_HOLD_MS) {
+          powerKeyHoldTriggered = true;
           activePowerTimer = PWR_TIMER_SHUTDOWN;
           powerTimerStartTime = now;
-          screenMessage = "SHUTDOWN IN 20s\nTAP ACT9: CANCEL";
+          screenMessage = "SHUTDOWN IN 20s\nTAP KEY: CANCEL";
           screenMessageDismissTime = now + POWER_TIMER_DURATION_MS;
           requestScreenUpdate(false, 50);
-          sendPayload("{\"device\":\"macropad\", \"layer\":4, \"action\":\"shutdown_timer_start\", \"duration\":20}");
+          sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"shutdown_timer_start\", \"duration\":20}");
           addDeviceLog("SYS", "PWR", "Shutdown timer started (Held 4s)");
           setKeyLED(16, strip.Color(255, 0, 0), 1000);
-          layer4Act9TapCount = 0;
+          powerKeyTapCount = 0;
         } else {
           // Visual progress feedback while holding key 16 (ramping up red)
-          unsigned long heldDuration = now - layer4Act9PressStartTime;
+          unsigned long heldDuration = now - powerKeyPressStartTime;
           if (heldDuration > 1000) {
-            uint8_t redVal = (uint8_t)(50 + (205 * heldDuration / LAYER4_ACT9_HOLD_MS));
+            uint8_t redVal = (uint8_t)(50 + (205 * heldDuration / POWER_KEY_HOLD_MS));
             strip.setPixelColor(keyToLedMap[16], strip.Color(redVal, 0, 0));
             strip.show();
           }
@@ -2526,10 +2575,10 @@ void loop() {
       }
     }
 
-    // When Layer 4 Key 16 is released
+    // When Key 16 is released
     if (lastState[16] && !currentScanState[16]) {
-      layer4Act9PressStartTime = 0;
-      layer4Act9HoldTriggered = false;
+      powerKeyPressStartTime = 0;
+      powerKeyHoldTriggered = false;
     }
 
     // Check 3x3 dynamic keys under modifier for long-press save and short-tap recall,
@@ -2723,14 +2772,14 @@ void loop() {
         screenMessage = "SHUTTING DOWN\nGOODBYE...";
         screenMessageDismissTime = now + 5000;
         requestScreenUpdate(false, 50);
-        sendPayload("{\"device\":\"macropad\", \"layer\":4, \"action\":\"pc_shutdown\"}");
+        sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"pc_shutdown\"}");
         addDeviceLog("SYS", "PWR", "Shutdown timer expired -> PC SHUTDOWN");
         setKeyLED(16, strip.Color(255, 0, 0), 5000);
       } else if (activePowerTimer == PWR_TIMER_RESTART) {
         screenMessage = "RESTARTING PC\nPLEASE WAIT...";
         screenMessageDismissTime = now + 5000;
         requestScreenUpdate(false, 50);
-        sendPayload("{\"device\":\"macropad\", \"layer\":4, \"action\":\"pc_restart\"}");
+        sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"pc_restart\"}");
         addDeviceLog("SYS", "PWR", "Restart timer expired -> PC RESTART");
         setKeyLED(16, strip.Color(255, 140, 0), 5000);
       }
@@ -2748,6 +2797,13 @@ void loop() {
         strip.show();
       }
     }
+  }
+
+  // Watchdog: If PC Companion hasn't sent telemetry/heartbeat in 15 seconds, mark offline
+  if (isPcOnline && (now - lastPcOnlineTime > PC_ONLINE_TIMEOUT_MS)) {
+    isPcOnline = false;
+    updatePowerKeyLabel();
+    addDeviceLog("SYS", "PC", "PC Companion timed out -> marked OFFLINE (WOL PC active)");
   }
 
   // ==========================================

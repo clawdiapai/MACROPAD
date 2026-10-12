@@ -1622,6 +1622,8 @@ def on_connect(client, userdata, flags, rc, properties=None):
         logger.info(f"Connected to MQTT broker at {MQTT_BROKER}")
         client.subscribe([(TOPIC_INPUT, 0), (TOPIC_STATUS, 0), (TOPIC_CONFIG_SYNC, 0)])
         logger.info(f"Subscribed to topics: {TOPIC_INPUT}, {TOPIC_STATUS}, {TOPIC_CONFIG_SYNC}")
+        # Announce PC Companion is online (retained so device sees state on connect)
+        client.publish(TOPIC_DISPLAY, json.dumps({"pc_online": True}), qos=1, retain=True)
         # Sync current mic status, voice call status, and Unified Hub config store
         publish_mic_state(is_discord_muted)
         publish_voice_call_state()
@@ -2167,6 +2169,7 @@ def start_window_watcher():
                         "title": win_title[:80],
                         "matched_rule": matched_name
                     }))
+                    mqtt_client.publish(TOPIC_DISPLAY, json.dumps({"pc_online": True}), retain=False)
 
             # Auto-switch layer if Auto-App Mode (Key 9) is enabled
             if synced_app_rules.get("auto_app_mode", False):
@@ -2283,6 +2286,8 @@ def on_tray_exit(icon, item):
             pass
     if mqtt_client:
         try:
+            mqtt_client.publish(TOPIC_DISPLAY, json.dumps({"pc_online": False}), qos=1, retain=True)
+            time.sleep(0.1)
             mqtt_client.disconnect()
         except Exception:
             pass
@@ -2362,6 +2367,7 @@ def main():
                 logger.error(f"Failed to start system tray icon: {e}")
 
     mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+    mqtt_client.will_set(TOPIC_DISPLAY, json.dumps({"pc_online": False}), qos=1, retain=True)
     mqtt_client.on_connect = on_connect
     mqtt_client.on_message = on_message
 

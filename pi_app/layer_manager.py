@@ -23,8 +23,8 @@ DEFAULT_LAYERS: Dict[str, Any] = {
             {"index": 4, "label": "PREV", "icon": "prev", "action": "media_prev"},
             {"index": 5, "label": "LIGHT", "icon": "light", "action": "light_toggle"},
             {"index": 6, "label": "VOL+", "icon": "vol_up", "action": "vol_up"},
-            {"index": 7, "label": "LT SLP", "icon": "sleep", "action": "wifi_sleep_toggle"},
-            {"index": 8, "label": "SLEEP", "icon": "power", "action": "sleep"},
+            {"index": 7, "label": "ACT 7", "icon": "code", "action": "macro"},
+            {"index": 8, "label": "ACT 8", "icon": "folder", "action": "macro"},
             {"index": 9, "label": "WOL PC", "icon": "terminal", "action": "wakeonlan"}
         ]
     },

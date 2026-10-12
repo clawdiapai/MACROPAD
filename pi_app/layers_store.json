@@ -44,15 +44,15 @@
         },
         {
           "index": 7,
-          "label": "LT SLP",
-          "icon": "sleep",
-          "action": "wifi_sleep_toggle"
+          "label": "ACT 7",
+          "icon": "code",
+          "action": "macro"
         },
         {
           "index": 8,
-          "label": "SLEEP",
-          "icon": "power",
-          "action": "sleep"
+          "label": "ACT 8",
+          "icon": "folder",
+          "action": "macro"
         },
         {
           "index": 9,
