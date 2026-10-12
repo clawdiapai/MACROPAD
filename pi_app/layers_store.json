@@ -1,0 +1,749 @@
+{
+  "layers": {
+    "1": {
+      "id": 1,
+      "name": "Media & General",
+      "bank": 1,
+      "slot": 1,
+      "cells": [
+        {
+          "index": 1,
+          "label": "PLAY",
+          "icon": "play",
+          "action": "media_play_pause"
+        },
+        {
+          "index": 2,
+          "label": "PAUSE",
+          "icon": "pause",
+          "action": "media_pause"
+        },
+        {
+          "index": 3,
+          "label": "NEXT",
+          "icon": "next",
+          "action": "media_next"
+        },
+        {
+          "index": 4,
+          "label": "PREV",
+          "icon": "prev",
+          "action": "media_prev"
+        },
+        {
+          "index": 5,
+          "label": "LIGHT",
+          "icon": "light",
+          "action": "light_toggle"
+        },
+        {
+          "index": 6,
+          "label": "VOL+",
+          "icon": "vol_up",
+          "action": "vol_up"
+        },
+        {
+          "index": 7,
+          "label": "LT SLP",
+          "icon": "sleep",
+          "action": "wifi_sleep_toggle"
+        },
+        {
+          "index": 8,
+          "label": "SLEEP",
+          "icon": "power",
+          "action": "sleep"
+        },
+        {
+          "index": 9,
+          "label": "WOL PC",
+          "icon": "terminal",
+          "action": "wakeonlan"
+        }
+      ]
+    },
+    "2": {
+      "id": 2,
+      "name": "Discord & Comm",
+      "bank": 1,
+      "slot": 2,
+      "cells": [
+        {
+          "index": 1,
+          "label": "DISCORD",
+          "icon": "discord",
+          "action": "discord_open"
+        },
+        {
+          "index": 2,
+          "label": "MUTE",
+          "icon": "mute",
+          "action": "mic_mute_toggle"
+        },
+        {
+          "index": 3,
+          "label": "MIC",
+          "icon": "mic",
+          "action": "mic_settings"
+        },
+        {
+          "index": 4,
+          "label": "ACT 4",
+          "icon": "",
+          "action": "macro_4"
+        },
+        {
+          "index": 5,
+          "label": "ACT 5",
+          "icon": "",
+          "action": "macro_5"
+        },
+        {
+          "index": 6,
+          "label": "ACT 6",
+          "icon": "",
+          "action": "macro_6"
+        },
+        {
+          "index": 7,
+          "label": "ACT 7",
+          "icon": "",
+          "action": "macro_7"
+        },
+        {
+          "index": 8,
+          "label": "ACT 8",
+          "icon": "",
+          "action": "macro_8"
+        },
+        {
+          "index": 9,
+          "label": "ACT 9",
+          "icon": "",
+          "action": "macro_9"
+        }
+      ]
+    },
+    "3": {
+      "id": 3,
+      "name": "Dev & Terminal",
+      "bank": 1,
+      "slot": 3,
+      "cells": [
+        {
+          "index": 1,
+          "label": "TERM",
+          "icon": "terminal",
+          "action": "open_terminal"
+        },
+        {
+          "index": 2,
+          "label": "LOCK",
+          "icon": "lock",
+          "action": "lock_pc"
+        },
+        {
+          "index": 3,
+          "label": "ACT 3",
+          "icon": "",
+          "action": "macro_3"
+        },
+        {
+          "index": 4,
+          "label": "ACT 4",
+          "icon": "",
+          "action": "macro_4"
+        },
+        {
+          "index": 5,
+          "label": "ACT 5",
+          "icon": "",
+          "action": "macro_5"
+        },
+        {
+          "index": 6,
+          "label": "ACT 6",
+          "icon": "",
+          "action": "macro_6"
+        },
+        {
+          "index": 7,
+          "label": "ACT 7",
+          "icon": "",
+          "action": "macro_7"
+        },
+        {
+          "index": 8,
+          "label": "ACT 8",
+          "icon": "",
+          "action": "macro_8"
+        },
+        {
+          "index": 9,
+          "label": "ACT 9",
+          "icon": "",
+          "action": "macro_9"
+        }
+      ]
+    },
+    "4": {
+      "id": 4,
+      "name": "System & Power",
+      "bank": 1,
+      "slot": 4,
+      "cells": [
+        {
+          "index": 1,
+          "label": "ACT 1",
+          "icon": "",
+          "action": "macro_1"
+        },
+        {
+          "index": 2,
+          "label": "ACT 2",
+          "icon": "",
+          "action": "macro_2"
+        },
+        {
+          "index": 3,
+          "label": "ACT 3",
+          "icon": "",
+          "action": "macro_3"
+        },
+        {
+          "index": 4,
+          "label": "ACT 4",
+          "icon": "",
+          "action": "macro_4"
+        },
+        {
+          "index": 5,
+          "label": "ACT 5",
+          "icon": "",
+          "action": "macro_5"
+        },
+        {
+          "index": 6,
+          "label": "ACT 6",
+          "icon": "",
+          "action": "macro_6"
+        },
+        {
+          "index": 7,
+          "label": "ACT 7",
+          "icon": "",
+          "action": "macro_7"
+        },
+        {
+          "index": 8,
+          "label": "ACT 8",
+          "icon": "",
+          "action": "macro_8"
+        },
+        {
+          "index": 9,
+          "label": "REBOOT",
+          "icon": "power",
+          "action": "restart_timer"
+        }
+      ]
+    },
+    "5": {
+      "id": 5,
+      "name": "CAD: Draw",
+      "bank": 2,
+      "slot": 1,
+      "cells": [
+        {
+          "index": 1,
+          "label": "LINE",
+          "icon": "cad_line",
+          "action": "cad_cmd:L"
+        },
+        {
+          "index": 2,
+          "label": "PLINE",
+          "icon": "cad_pline",
+          "action": "cad_cmd:PL"
+        },
+        {
+          "index": 3,
+          "label": "RECT",
+          "icon": "cad_rect",
+          "action": "cad_cmd:REC"
+        },
+        {
+          "index": 4,
+          "label": "CIRCLE",
+          "icon": "cad_circle",
+          "action": "cad_cmd:C"
+        },
+        {
+          "index": 5,
+          "label": "ARC",
+          "icon": "cad_arc",
+          "action": "cad_cmd:A"
+        },
+        {
+          "index": 6,
+          "label": "POLY",
+          "icon": "cad_poly",
+          "action": "cad_cmd:POL"
+        },
+        {
+          "index": 7,
+          "label": "SPLINE",
+          "icon": "cad_spline",
+          "action": "cad_cmd:SPL"
+        },
+        {
+          "index": 8,
+          "label": "HATCH",
+          "icon": "cad_hatch",
+          "action": "cad_cmd:H"
+        },
+        {
+          "index": 9,
+          "label": "ESC",
+          "icon": "cad_esc",
+          "action": "cad_key:ESC"
+        }
+      ]
+    },
+    "6": {
+      "id": 6,
+      "name": "CAD: Modify",
+      "bank": 2,
+      "slot": 2,
+      "cells": [
+        {
+          "index": 1,
+          "label": "MOVE",
+          "icon": "cad_move",
+          "action": "cad_cmd:M"
+        },
+        {
+          "index": 2,
+          "label": "COPY",
+          "icon": "cad_copy",
+          "action": "cad_cmd:CO"
+        },
+        {
+          "index": 3,
+          "label": "ROTATE",
+          "icon": "cad_rotate",
+          "action": "cad_cmd:RO"
+        },
+        {
+          "index": 4,
+          "label": "TRIM",
+          "icon": "cad_trim",
+          "action": "cad_cmd:TR"
+        },
+        {
+          "index": 5,
+          "label": "EXTEND",
+          "icon": "cad_extend",
+          "action": "cad_cmd:EX"
+        },
+        {
+          "index": 6,
+          "label": "OFFSET",
+          "icon": "cad_offset",
+          "action": "cad_cmd:O"
+        },
+        {
+          "index": 7,
+          "label": "MIRROR",
+          "icon": "cad_mirror",
+          "action": "cad_cmd:MI"
+        },
+        {
+          "index": 8,
+          "label": "SCALE",
+          "icon": "cad_scale",
+          "action": "cad_cmd:SC"
+        },
+        {
+          "index": 9,
+          "label": "STRETCH",
+          "icon": "cad_stretch",
+          "action": "cad_cmd:S"
+        }
+      ]
+    },
+    "7": {
+      "id": 7,
+      "name": "CAD: Construct",
+      "bank": 2,
+      "slot": 3,
+      "cells": [
+        {
+          "index": 1,
+          "label": "FILLET",
+          "icon": "cad_fillet",
+          "action": "cad_cmd:F"
+        },
+        {
+          "index": 2,
+          "label": "CHAMFER",
+          "icon": "cad_chamfer",
+          "action": "cad_cmd:CHA"
+        },
+        {
+          "index": 3,
+          "label": "JOIN",
+          "icon": "cad_join",
+          "action": "cad_cmd:J"
+        },
+        {
+          "index": 4,
+          "label": "EXPLODE",
+          "icon": "cad_explode",
+          "action": "cad_cmd:X"
+        },
+        {
+          "index": 5,
+          "label": "BREAK",
+          "icon": "cad_break",
+          "action": "cad_cmd:BR"
+        },
+        {
+          "index": 6,
+          "label": "ALIGN",
+          "icon": "cad_align",
+          "action": "cad_cmd:AL"
+        },
+        {
+          "index": 7,
+          "label": "ARRAY",
+          "icon": "cad_array",
+          "action": "cad_cmd:AR"
+        },
+        {
+          "index": 8,
+          "label": "ERASE",
+          "icon": "cad_erase",
+          "action": "cad_cmd:E"
+        },
+        {
+          "index": 9,
+          "label": "MATCH",
+          "icon": "cad_match",
+          "action": "cad_cmd:MA"
+        }
+      ]
+    },
+    "8": {
+      "id": 8,
+      "name": "CAD: Precision & Snaps",
+      "bank": 2,
+      "slot": 4,
+      "cells": [
+        {
+          "index": 1,
+          "label": "OSNAP",
+          "icon": "cad_osnap",
+          "action": "cad_key:F3"
+        },
+        {
+          "index": 2,
+          "label": "ORTHO",
+          "icon": "cad_ortho",
+          "action": "cad_key:F8"
+        },
+        {
+          "index": 3,
+          "label": "POLAR",
+          "icon": "cad_polar",
+          "action": "cad_key:F10"
+        },
+        {
+          "index": 4,
+          "label": "OTRACK",
+          "icon": "cad_otrack",
+          "action": "cad_key:F11"
+        },
+        {
+          "index": 5,
+          "label": "DYN IN",
+          "icon": "cad_dyn",
+          "action": "cad_key:F12"
+        },
+        {
+          "index": 6,
+          "label": "GRID",
+          "icon": "cad_grid",
+          "action": "cad_key:F7"
+        },
+        {
+          "index": 7,
+          "label": "MID2P",
+          "icon": "cad_mid2p",
+          "action": "cad_cmd:M2P"
+        },
+        {
+          "index": 8,
+          "label": "FROM",
+          "icon": "cad_from",
+          "action": "cad_cmd:FROM"
+        },
+        {
+          "index": 9,
+          "label": "ISOLATE",
+          "icon": "cad_isolate",
+          "action": "cad_cmd:ISOLATEOBJECTS"
+        }
+      ]
+    },
+    "9": {
+      "id": 9,
+      "name": "CAD: Annotate",
+      "bank": 3,
+      "slot": 1,
+      "cells": [
+        {
+          "index": 1,
+          "label": "DIM",
+          "icon": "cad_dim",
+          "action": "cad_cmd:DIM"
+        },
+        {
+          "index": 2,
+          "label": "DIMLIN",
+          "icon": "cad_dimlin",
+          "action": "cad_cmd:DLI"
+        },
+        {
+          "index": 3,
+          "label": "DIMALI",
+          "icon": "cad_dimali",
+          "action": "cad_cmd:DAL"
+        },
+        {
+          "index": 4,
+          "label": "DIMANG",
+          "icon": "cad_dimang",
+          "action": "cad_cmd:DAN"
+        },
+        {
+          "index": 5,
+          "label": "DIMRAD",
+          "icon": "cad_dimrad",
+          "action": "cad_cmd:DRA"
+        },
+        {
+          "index": 6,
+          "label": "LEADER",
+          "icon": "cad_leader",
+          "action": "cad_cmd:MLEADER"
+        },
+        {
+          "index": 7,
+          "label": "MTEXT",
+          "icon": "cad_mtext",
+          "action": "cad_cmd:MT"
+        },
+        {
+          "index": 8,
+          "label": "TABLE",
+          "icon": "cad_table",
+          "action": "cad_cmd:TB"
+        },
+        {
+          "index": 9,
+          "label": "DIMCONT",
+          "icon": "cad_dimcont",
+          "action": "cad_cmd:DCO"
+        }
+      ]
+    },
+    "10": {
+      "id": 10,
+      "name": "CAD: Layers",
+      "bank": 3,
+      "slot": 2,
+      "cells": [
+        {
+          "index": 1,
+          "label": "LA MGR",
+          "icon": "cad_layers",
+          "action": "cad_cmd:LA"
+        },
+        {
+          "index": 2,
+          "label": "LAYISO",
+          "icon": "cad_layiso",
+          "action": "cad_cmd:LAYISO"
+        },
+        {
+          "index": 3,
+          "label": "LAYUNISO",
+          "icon": "cad_layuniso",
+          "action": "cad_cmd:LAYUNISO"
+        },
+        {
+          "index": 4,
+          "label": "LAYOFF",
+          "icon": "cad_layoff",
+          "action": "cad_cmd:LAYOFF"
+        },
+        {
+          "index": 5,
+          "label": "LAYON",
+          "icon": "cad_layon",
+          "action": "cad_cmd:LAYON"
+        },
+        {
+          "index": 6,
+          "label": "LAYFRZ",
+          "icon": "cad_layfrz",
+          "action": "cad_cmd:LAYFRZ"
+        },
+        {
+          "index": 7,
+          "label": "LAYMCUR",
+          "icon": "cad_laymcur",
+          "action": "cad_cmd:LAYMCUR"
+        },
+        {
+          "index": 8,
+          "label": "PROPS",
+          "icon": "cad_props",
+          "action": "cad_cmd:PR"
+        },
+        {
+          "index": 9,
+          "label": "MATCH",
+          "icon": "cad_match",
+          "action": "cad_cmd:MA"
+        }
+      ]
+    },
+    "11": {
+      "id": 11,
+      "name": "CAD: Blocks & Inquiry",
+      "bank": 3,
+      "slot": 3,
+      "cells": [
+        {
+          "index": 1,
+          "label": "INSERT",
+          "icon": "cad_insert",
+          "action": "cad_cmd:I"
+        },
+        {
+          "index": 2,
+          "label": "BLOCK",
+          "icon": "cad_block",
+          "action": "cad_cmd:B"
+        },
+        {
+          "index": 3,
+          "label": "BEDIT",
+          "icon": "cad_bedit",
+          "action": "cad_cmd:BE"
+        },
+        {
+          "index": 4,
+          "label": "WBLOCK",
+          "icon": "cad_wblock",
+          "action": "cad_cmd:W"
+        },
+        {
+          "index": 5,
+          "label": "XREF",
+          "icon": "cad_xref",
+          "action": "cad_cmd:XR"
+        },
+        {
+          "index": 6,
+          "label": "DIST",
+          "icon": "cad_dist",
+          "action": "cad_cmd:DI"
+        },
+        {
+          "index": 7,
+          "label": "AREA",
+          "icon": "cad_area",
+          "action": "cad_cmd:AA"
+        },
+        {
+          "index": 8,
+          "label": "ID PT",
+          "icon": "cad_idpt",
+          "action": "cad_cmd:ID"
+        },
+        {
+          "index": 9,
+          "label": "QSELECT",
+          "icon": "cad_qselect",
+          "action": "cad_cmd:QSELECT"
+        }
+      ]
+    },
+    "12": {
+      "id": 12,
+      "name": "CAD: View & Plot",
+      "bank": 3,
+      "slot": 4,
+      "cells": [
+        {
+          "index": 1,
+          "label": "Z EXT",
+          "icon": "cad_zext",
+          "action": "cad_cmd:Z E"
+        },
+        {
+          "index": 2,
+          "label": "Z WIN",
+          "icon": "cad_zwin",
+          "action": "cad_cmd:Z W"
+        },
+        {
+          "index": 3,
+          "label": "Z PREV",
+          "icon": "cad_zprev",
+          "action": "cad_cmd:Z P"
+        },
+        {
+          "index": 4,
+          "label": "REGEN",
+          "icon": "cad_regen",
+          "action": "cad_cmd:RE"
+        },
+        {
+          "index": 5,
+          "label": "PURGE",
+          "icon": "cad_purge",
+          "action": "cad_cmd:PU"
+        },
+        {
+          "index": 6,
+          "label": "AUDIT",
+          "icon": "cad_audit",
+          "action": "cad_cmd:AUDIT Y"
+        },
+        {
+          "index": 7,
+          "label": "PLOT",
+          "icon": "cad_plot",
+          "action": "cad_key:CTRL+P"
+        },
+        {
+          "index": 8,
+          "label": "QSAVE",
+          "icon": "cad_qsave",
+          "action": "cad_key:CTRL+S"
+        },
+        {
+          "index": 9,
+          "label": "OVERKILL",
+          "icon": "cad_overkill",
+          "action": "cad_cmd:OVERKILL"
+        }
+      ]
+    }
+  },
+  "custom_icons": {}
+}

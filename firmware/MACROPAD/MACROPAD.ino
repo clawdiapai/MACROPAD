@@ -12,6 +12,7 @@
 #include <Update.h>
 #include "esp_sleep.h"
 #include "driver/gpio.h"
+#include "esp_private/brownout.h"
 #include "dashboard_html.h"
 
 // ==========================================
@@ -200,6 +201,22 @@ bool isAudioModifierUsed = false;
 bool isMicMuted = false;
 bool inVoiceCall = false;
 
+// Operating Modes: Auto-App Switching, Manual Layers, Dedicated Debug Diagnostics
+enum DeviceOperatingMode {
+  MODE_AUTO = 0,
+  MODE_MANUAL = 1,
+  MODE_DEBUG = 2
+};
+RTC_DATA_ATTR int rtcDeviceMode = 0;
+DeviceOperatingMode deviceMode = MODE_AUTO;
+bool isAutoAppMode = true;
+
+// Key 9 (Left-Middle Fixed Key): Short Tap = Cycle Mode (Auto -> Manual -> Debug), Long Hold (420ms) = Status/Battery HUD
+unsigned long key9PressTime = 0;
+unsigned long key9LastSeenTime = 0;
+bool key9LongTriggered = false;
+const unsigned long KEY9_HOLD_HUD_MS = 420;
+
 unsigned long screenMessageDismissTime = 0;
 const unsigned long POPUP_TIMEOUT_MS = 2000;
 
@@ -234,6 +251,12 @@ bool screenNeedsUpdate = true;
 unsigned long screenUpdateScheduledTime = 0;
 String screenMessage = "BOOTING...";
 String gridLabels[9] = {"ACT 1", "ACT 2", "ACT 3", "ACT 4", "ACT 5", "ACT 6", "LT SLP", "SLEEP", "WOL PC"};
+uint8_t gridIconBitmaps[9][72]; // 24x24 1-bit monochrome bitmaps (3 bytes/row * 24 rows = 72 bytes)
+bool hasGridIcon[9] = {false};
+uint16_t currentHoldMask = 0;   // Bit mask (bits 0..8) of cells that have hold / radial menu actions
+unsigned long macroKeyPressTime[10] = {0};
+bool macroKeyHoldTriggered[10] = {false};
+const unsigned long MACRO_HOLD_TRIGGER_MS = 250; // Hold threshold for radial pie menus & hold actions
 bool isWifiSleepActive = true;
 bool isHudActive = false;
 unsigned long hudAutoDismissTime = 0;
@@ -527,6 +550,7 @@ void drawTopBar() {
 void drawGrid() {
   display.setFont(&FreeSansBold9pt7b); 
   display.setTextSize(1);
+  display.setTextColor(GxEPD_BLACK);
   
   display.drawLine(66, 16, 66, 200, GxEPD_BLACK);
   display.drawLine(133, 16, 133, 200, GxEPD_BLACK);
@@ -546,27 +570,59 @@ void drawGrid() {
         lbl = lbl.substring(1); 
       }
 
-      int newlineIdx = lbl.indexOf('\n');
-      if (newlineIdx >= 0) {
-        String l1 = lbl.substring(0, newlineIdx);
-        String l2 = lbl.substring(newlineIdx + 1);
-        if (l1.length() > 6) l1 = l1.substring(0, 5) + ".";
-        display.setFont(&FreeSansBold9pt7b);
-        display.setTextSize(1);
-        display.setCursor(cellX + 4, cellY + 28);
-        display.print(l1);
+      bool cellHasIcon = (index < 9 && hasGridIcon[index]);
+
+      if (cellHasIcon) {
+        // Draw 24x24 bitmap centered horizontally in the 66-wide cell
+        // cellX + (66 - 24) / 2 = cellX + 21
+        // Y: cellY + 3
+        display.drawBitmap(cellX + 21, cellY + 3, gridIconBitmaps[index], 24, 24, GxEPD_BLACK);
+
+        // Render label beneath the icon using clean 6x8 default font
         display.setFont();
         display.setTextSize(1);
-        display.setCursor(cellX + 6, cellY + 44);
-        display.print(l2);
+        int newlineIdx = lbl.indexOf('\n');
+        if (newlineIdx >= 0) {
+          String l1 = lbl.substring(0, newlineIdx);
+          String l2 = lbl.substring(newlineIdx + 1);
+          if (l1.length() > 9) l1 = l1.substring(0, 8) + ".";
+          if (l2.length() > 9) l2 = l2.substring(0, 8) + ".";
+          int x1 = cellX + max(2, (66 - (int)l1.length() * 6) / 2);
+          int x2 = cellX + max(2, (66 - (int)l2.length() * 6) / 2);
+          display.setCursor(x1, cellY + 32);
+          display.print(l1);
+          display.setCursor(x2, cellY + 44);
+          display.print(l2);
+        } else {
+          if (lbl.length() > 9) lbl = lbl.substring(0, 8) + ".";
+          int x = cellX + max(2, (66 - (int)lbl.length() * 6) / 2);
+          display.setCursor(x, cellY + 38);
+          display.print(lbl);
+        }
       } else {
-        display.setFont(&FreeSansBold9pt7b);
-        display.setTextSize(1);
-        int textX = cellX + 4; 
-        int textY = cellY + 45; 
-        display.setCursor(textX, textY);
-        if (lbl.length() > 6) lbl = lbl.substring(0, 5) + ".";
-        display.print(lbl);
+        // No icon: Render larger text
+        int newlineIdx = lbl.indexOf('\n');
+        if (newlineIdx >= 0) {
+          String l1 = lbl.substring(0, newlineIdx);
+          String l2 = lbl.substring(newlineIdx + 1);
+          if (l1.length() > 6) l1 = l1.substring(0, 5) + ".";
+          display.setFont(&FreeSansBold9pt7b);
+          display.setTextSize(1);
+          display.setCursor(cellX + 4, cellY + 28);
+          display.print(l1);
+          display.setFont();
+          display.setTextSize(1);
+          display.setCursor(cellX + 6, cellY + 44);
+          display.print(l2);
+        } else {
+          display.setFont(&FreeSansBold9pt7b);
+          display.setTextSize(1);
+          int textX = cellX + 4; 
+          int textY = cellY + 45; 
+          display.setCursor(textX, textY);
+          if (lbl.length() > 6) lbl = lbl.substring(0, 5) + ".";
+          display.print(lbl);
+        }
       }
       
       if (isActive) {
@@ -855,6 +911,34 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   if (doc["labels"].is<JsonArray>()) {
     JsonArray newLabels = doc["labels"].as<JsonArray>();
     for (size_t i = 0; i < 9 && i < newLabels.size(); i++) gridLabels[i] = newLabels[i].as<String>();
+    
+    // Parse 24x24 monochrome bitmap icons (144 hex characters = 72 bytes)
+    if (doc["icons"].is<JsonArray>()) {
+      JsonArray newIcons = doc["icons"].as<JsonArray>();
+      for (size_t i = 0; i < 9; i++) {
+        hasGridIcon[i] = false;
+        if (i < newIcons.size()) {
+          const char* hStr = newIcons[i].as<const char*>();
+          if (hStr && strlen(hStr) >= 144) {
+            for (int b = 0; b < 72; b++) {
+              char hi = hStr[b * 2];
+              char lo = hStr[b * 2 + 1];
+              uint8_t vHi = (hi >= '0' && hi <= '9') ? (hi - '0') : ((hi >= 'a' && hi <= 'f') ? (hi - 'a' + 10) : ((hi >= 'A' && hi <= 'F') ? (hi - 'A' + 10) : 0));
+              uint8_t vLo = (lo >= '0' && lo <= '9') ? (lo - '0') : ((lo >= 'a' && lo <= 'f') ? (lo - 'a' + 10) : ((lo >= 'A' && lo <= 'F') ? (lo - 'A' + 10) : 0));
+              gridIconBitmaps[i][b] = (vHi << 4) | vLo;
+            }
+            hasGridIcon[i] = true;
+          }
+        }
+      }
+    } else {
+      for (size_t i = 0; i < 9; i++) hasGridIcon[i] = false;
+    }
+
+    if (doc.containsKey("hold_mask")) {
+      currentHoldMask = doc["hold_mask"].as<uint16_t>();
+    }
+
     if (millis() >= screenMessageDismissTime) {
       screenMessage = ""; 
     }
@@ -862,7 +946,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     if (fast || inVoiceCall) {
       requestScreenUpdate(false, 50); // Fast partial refresh for dynamic voice call & modifier transitions
     } else {
-      requestScreenUpdate(true, 50); // New labels -> full refresh to eliminate ghosting
+      requestScreenUpdate(true, 50); // New labels/icons -> full refresh to eliminate ghosting
     }
   }
   if (doc.containsKey("ack")) {
@@ -928,6 +1012,27 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     isMicMuted = doc["mic_muted"].as<bool>();
     updateMicLed(true);
   }
+  if (doc.containsKey("mode")) {
+    String m = doc["mode"].as<String>();
+    if (m == "automode" || m == "auto") {
+      deviceMode = MODE_AUTO;
+      isAutoAppMode = true;
+    } else if (m == "debug") {
+      deviceMode = MODE_DEBUG;
+      isAutoAppMode = false;
+    } else {
+      deviceMode = MODE_MANUAL;
+      isAutoAppMode = false;
+    }
+    rtcDeviceMode = (int)deviceMode;
+    updateLayerLEDs(true);
+  } else if (doc.containsKey("auto_app_mode")) {
+    bool a = doc["auto_app_mode"].as<bool>();
+    isAutoAppMode = a;
+    deviceMode = a ? MODE_AUTO : MODE_MANUAL;
+    rtcDeviceMode = (int)deviceMode;
+    updateLayerLEDs(true);
+  }
 }
 
 const char* getResetReasonString(esp_reset_reason_t reason) {
@@ -964,6 +1069,8 @@ void sendHeartbeat() {
                    ",\"bank\":" + String(currentBank + 1) + 
                    ",\"slot\":" + String(currentSlot + 1) + 
                    ",\"layer\":" + String(currentLayer) + 
+                   ",\"mode\":\"" + String(deviceMode == MODE_AUTO ? "automode" : (deviceMode == MODE_DEBUG ? "debug" : "manual")) + "\"" +
+                   ",\"auto_app_mode\":" + (isAutoAppMode ? "true" : "false") +
                    ",\"reset_reason\":\"" + String(getResetReasonString(esp_reset_reason())) + "\"" +
                    ",\"modifier\":" + (isModifierHeld ? "true" : "false") + "}";
   mqttClient.publish(mqtt_topic_status, payload.c_str());
@@ -993,6 +1100,8 @@ void setupWebServer() {
                   ",\"bank\":" + String(currentBank + 1) + 
                   ",\"slot\":" + String(currentSlot + 1) + 
                   ",\"layer\":" + String(currentLayer) + 
+                  ",\"mode\":\"" + String(deviceMode == MODE_AUTO ? "automode" : (deviceMode == MODE_DEBUG ? "debug" : "manual")) + "\"" +
+                  ",\"auto_app_mode\":" + (isAutoAppMode ? "true" : "false") +
                   ",\"modifier\":" + (isModifierHeld ? "true" : "false") + 
                   ",\"reset_reason\":\"" + String(getResetReasonString(esp_reset_reason())) + "\"" + 
                   ",\"screen_msg\":\"" + screenMessage + "\"" + 
@@ -1000,15 +1109,47 @@ void setupWebServer() {
     server.send(200, "application/json", json);
   });
 
+  auto handleSetMode = []() {
+    lastActivityTime = millis();
+    if (server.hasArg("mode")) {
+      String m = server.arg("mode");
+      if (m == "automode" || m == "auto") {
+        deviceMode = MODE_AUTO;
+        isAutoAppMode = true;
+      } else if (m == "debug") {
+        deviceMode = MODE_DEBUG;
+        isAutoAppMode = false;
+      } else if (m == "manual") {
+        deviceMode = MODE_MANUAL;
+        isAutoAppMode = false;
+      }
+      rtcDeviceMode = (int)deviceMode;
+      updateLayerLEDs(true);
+      requestScreenUpdate(false, 80);
+      String modeStr = (deviceMode == MODE_AUTO) ? "automode" : (deviceMode == MODE_DEBUG ? "debug" : "manual");
+      sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"mode_change\", \"mode\":\"" + modeStr + "\", \"auto_app_mode\":" + String(isAutoAppMode ? "true" : "false") + "}");
+      addDeviceLog("SYS", "MODE", ("Web set mode -> " + modeStr).c_str());
+      server.send(200, "text/plain", modeStr);
+      return;
+    }
+    server.send(400, "text/plain", "Missing mode");
+  };
+  server.on("/api/set_mode", HTTP_POST, handleSetMode);
+  server.on("/api/set_mode", HTTP_GET, handleSetMode);
+
   server.on("/api/logs", HTTP_GET, []() {
     String json = "[";
     for (int i = 0; i < logCount; i++) {
       int idx = (logHead + i) % MAX_DEVICE_LOGS;
       if (i > 0) json += ",";
+      String cleanMsg = String(deviceLogs[idx].msg);
+      cleanMsg.replace("\"", "'");
+      cleanMsg.replace("\r", "");
+      cleanMsg.replace("\n", " ");
       json += "{\"t\":" + String(deviceLogs[idx].t) + 
               ",\"lvl\":\"" + String(deviceLogs[idx].lvl) + "\"" + 
               ",\"tag\":\"" + String(deviceLogs[idx].tag) + "\"" + 
-              ",\"msg\":\"" + String(deviceLogs[idx].msg) + "\"}";
+              ",\"msg\":\"" + cleanMsg + "\"}";
     }
     json += "]";
     server.send(200, "application/json", json);
@@ -1061,7 +1202,17 @@ void setupWebServer() {
   server.on("/update", HTTP_POST, []() {
     server.sendHeader("Connection", "close");
     server.send(200, "text/plain", (Update.hasError()) ? "FAIL" : "OK");
-    delay(500);
+    delay(200);
+    // Graceful teardown before hardware reboot to ensure clean ROM boot
+    if (webServerStarted) server.stop();
+    if (mqttClient.connected()) mqttClient.disconnect();
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+    display.powerOff();
+    strip.clear();
+    strip.show();
+    setMatrixIdle();
+    delay(200);
     ESP.restart();
   }, []() {
     HTTPUpload& upload = server.upload();
@@ -1083,7 +1234,16 @@ void setupWebServer() {
 
   server.on("/api/reboot", HTTP_POST, []() {
     server.send(200, "text/plain", "Rebooting...");
-    delay(500);
+    delay(200);
+    if (webServerStarted) server.stop();
+    if (mqttClient.connected()) mqttClient.disconnect();
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+    display.powerOff();
+    strip.clear();
+    strip.show();
+    setMatrixIdle();
+    delay(200);
     ESP.restart();
   });
 
@@ -1104,6 +1264,7 @@ void setupNetwork() {
   WiFi.setTxPower(WIFI_POWER_15dBm); // Prevents battery voltage brownouts on peak RF bursts
   WiFi.begin(ssid, password);
   mqttClient.setServer(mqtt_server, 1883);
+  mqttClient.setBufferSize(2048); // Allows receiving full layer icon/label payloads (1500+ bytes)
   mqttClient.setSocketTimeout(1); // 1-second timeout (prevents 15s connection hangs)
   mqttClient.setCallback(mqttCallback);
 }
@@ -1248,7 +1409,13 @@ void updateLayerLEDs(bool doShow) {
     }
   }
   if (isHudActive) {
-    strip.setPixelColor(keyToLedMap[9], strip.Color(0, 240, 255));
+    strip.setPixelColor(keyToLedMap[9], strip.Color(0, 240, 255)); // Cyan for HUD peek
+  } else if (deviceMode == MODE_AUTO) {
+    strip.setPixelColor(keyToLedMap[9], strip.Color(0, 220, 110)); // Emerald Green for Auto-App Mode
+  } else if (deviceMode == MODE_DEBUG) {
+    strip.setPixelColor(keyToLedMap[9], strip.Color(255, 140, 0));  // Amber/Orange for Debug Diagnostics
+  } else {
+    strip.setPixelColor(keyToLedMap[9], strip.Color(0, 0, 0));      // Off for Manual Mode
   }
   updateMicLed(false);
   if (doShow) strip.show();
@@ -1705,6 +1872,7 @@ void renderNotificationAnimations(unsigned long now) {
 // MAIN SETUP
 // ==========================================
 void setup() {
+  esp_brownout_disable(); // Properly disables IDF brownout detection (eliminates boot loops from voltage sags)
   Serial.begin(115200);
   setCpuFrequencyMhz(80); // Reduces CPU power consumption by ~50%
 
@@ -1724,6 +1892,9 @@ void setup() {
     rtcSlot = 0;
     rtcLayer = 1;
     rtcWasDeepSleep = false;
+    deviceMode = MODE_AUTO;
+    isAutoAppMode = true;
+    rtcDeviceMode = 0;
     screenMessage = "BOOTING...";
     screenMessageDismissTime = millis() + 4000;
     addDeviceLog("SYS", "BOOT", ("System Boot: " + String(getResetReasonString(esp_reset_reason()))).c_str());
@@ -1825,8 +1996,16 @@ void loop() {
         if (!isTopRow) {
           if (keyToLedMap[5] == i && isModifierHeld) {
             strip.setPixelColor(i, strip.Color(0, 200, 255));
-          } else if (keyToLedMap[9] == i && isHudActive) {
-            strip.setPixelColor(i, strip.Color(0, 240, 255));
+          } else if (keyToLedMap[9] == i) {
+            if (isHudActive) {
+              strip.setPixelColor(i, strip.Color(0, 240, 255));
+            } else if (deviceMode == MODE_AUTO) {
+              strip.setPixelColor(i, strip.Color(0, 220, 110));
+            } else if (deviceMode == MODE_DEBUG) {
+              strip.setPixelColor(i, strip.Color(255, 140, 0));
+            } else {
+              strip.setPixelColor(i, strip.Color(0, 0, 0));
+            }
           } else if (keyToLedMap[13] == i) {
             if (isAudioModifierHeld) {
               strip.setPixelColor(i, strip.Color(180, 0, 255));
@@ -2135,9 +2314,17 @@ void loop() {
               else if (id == 3) selectLayerSlot(2);
               else if (id == 4) selectLayerSlot(3);
               
-              // Fixed Key 9 in Left Column -> Full Screen Status HUD Peek
+              // Fixed Key 9 in Left Column -> Short Tap = Mode Cycle, Long Hold = Status HUD Peek
               else if (id == 9) {
-                toggleHud();
+                if (isHudActive) {
+                  toggleHud();
+                  key9PressTime = 0;
+                  key9LongTriggered = true;
+                } else {
+                  key9PressTime = now;
+                  key9LastSeenTime = now;
+                  key9LongTriggered = false;
+                }
               }
               
               // 3x3 Dynamic Matrix Keys (Mirrors E-Ink Screen)
@@ -2186,15 +2373,19 @@ void loop() {
                       dynKeyPressTime[dynIdx] = now;
                       dynKeyHeld[dynIdx] = false;
                       setKeyLED(id, strip.Color(0, 150, 255), 100); // Visual touch feedback (blue)
-                    } else {
-                      if (currentLayer == 1 && dynIdx == 1) {
+                    } else if (deviceMode == MODE_DEBUG) {
+                      // Dedicated hardware diagnostics layer (strictly isolated)
+                      if (dynIdx == 1) {
                         isScreenBlackTestActive = !isScreenBlackTestActive;
                         requestScreenUpdate(true, 50);
                         addDeviceLog("DISP", "TEST", isScreenBlackTestActive ? "Screen Alignment: SOLID BLACK" : "Screen Alignment: NORMAL");
                         setKeyLED(id, isScreenBlackTestActive ? strip.Color(255, 0, 255) : strip.Color(0, 255, 0), 400);
-                        sendPayload("{\"device\":\"macropad\", \"layer\":1, \"action\":\"macro\", \"index\":1, \"label\":\"ACT 1\", \"black_test\":" + String(isScreenBlackTestActive ? "true" : "false") + "}");
-                      } else if (currentLayer == 1 && dynIdx == 7) {
-                        // ACT 7 on Layer 1: Toggle WiFi Light / Modem Sleep mode for power measurement
+                        sendPayload("{\"device\":\"macropad\", \"mode\":\"debug\", \"action\":\"black_test\", \"enabled\":" + String(isScreenBlackTestActive ? "true" : "false") + "}");
+                      } else if (dynIdx == 2) {
+                        showBatteryCalibration();
+                      } else if (dynIdx == 3) {
+                        toggleHud();
+                      } else if (dynIdx == 7) {
                         isWifiSleepActive = !isWifiSleepActive;
                         WiFi.setSleep(isWifiSleepActive);
                         if (isWifiSleepActive) {
@@ -2208,25 +2399,31 @@ void loop() {
                         }
                         screenMessageDismissTime = millis() + 4000;
                         requestScreenUpdate(false, 50);
-                        sendPayload("{\"device\":\"macropad\", \"layer\":1, \"action\":\"wifi_sleep_toggle\", \"enabled\":" + String(isWifiSleepActive ? "true" : "false") + "}");
-                      } else if (currentLayer == 1 && dynIdx == 8) {
-                        // ACT 8 on Layer 1: Instant Deep Sleep toggle
-                        addDeviceLog("SYS", "PWR", "ACT 8 pressed: Manual Instant Deep Sleep");
+                        sendPayload("{\"device\":\"macropad\", \"mode\":\"debug\", \"action\":\"wifi_sleep_toggle\", \"enabled\":" + String(isWifiSleepActive ? "true" : "false") + "}");
+                      } else if (dynIdx == 8) {
+                        addDeviceLog("SYS", "PWR", "Debug Key 8: Manual Instant Deep Sleep");
                         setKeyLED(id, strip.Color(160, 0, 255), 300);
-                        sendPayload("{\"device\":\"macropad\", \"layer\":1, \"action\":\"sleep\", \"index\":8, \"label\":\"SLEEP\"}");
+                        sendPayload("{\"device\":\"macropad\", \"mode\":\"debug\", \"action\":\"sleep\"}");
                         delay(150);
                         enterDeepSleep(false);
-                      } else if (currentLayer == 1 && dynIdx == 9) {
+                      } else if (dynIdx == 9) {
                         sendWakeOnLan("d4:93:90:3b:f0:89");
                         screenMessage = "WOL PC:\nSENT MAGIC PKT";
                         screenMessageDismissTime = millis() + 2500;
                         requestScreenUpdate(false, 50);
                         setKeyLED(id, strip.Color(0, 255, 200), 400);
-                        sendPayload("{\"device\":\"macropad\", \"layer\":1, \"action\":\"wakeonlan\", \"index\":9, \"label\":\"WOL PC\", \"mac\":\"d4:93:90:3b:f0:89\"}");
+                        sendPayload("{\"device\":\"macropad\", \"mode\":\"debug\", \"action\":\"wakeonlan\", \"mac\":\"d4:93:90:3b:f0:89\"}");
                         addDeviceLog("INP", "WOL", "Sent Wake-on-LAN to d4:93:90:3b:f0:89");
-                      } else if (currentLayer == 4 && dynIdx == 9) {
+                      } else {
+                        String lbl = gridLabels[dynIdx - 1];
+                        sendPayload("{\"device\":\"macropad\", \"mode\":\"debug\", \"action\":\"debug_macro\", \"index\":" + String(dynIdx) + ", \"label\":\"" + lbl + "\"}");
+                        addDeviceLog("INP", "DEBUG", ("Key #" + String(dynIdx) + " (" + lbl + ")").c_str());
+                        setKeyLED(id, strip.Color(255, 140, 0), 100);
+                      }
+                    } else {
+                      // MODE_AUTO and MODE_MANUAL: completely normal layer actions
+                      if (currentLayer == 4 && dynIdx == 9) {
                         if (activePowerTimer != PWR_TIMER_NONE) {
-                          // Already running a shutdown/restart timer -> CANCEL IT
                           String prevType = (activePowerTimer == PWR_TIMER_SHUTDOWN) ? "SHUTDOWN" : "RESTART";
                           activePowerTimer = PWR_TIMER_NONE;
                           screenMessage = "CANCELLED\n" + prevType + " ABORT";
@@ -2239,7 +2436,6 @@ void loop() {
                           layer4Act9PressStartTime = 0;
                           layer4Act9HoldTriggered = false;
                         } else {
-                          // Tap tracking for restart (4 taps in < 5 seconds)
                           layer4Act9PressStartTime = now;
                           layer4Act9HoldTriggered = false;
                           if (now - layer4Act9WindowStartTime > LAYER4_ACT9_WINDOW_MS) {
@@ -2250,7 +2446,6 @@ void loop() {
                           }
 
                           if (layer4Act9TapCount >= 4) {
-                            // 4 taps reached within 5 seconds -> START RESTART TIMER
                             activePowerTimer = PWR_TIMER_RESTART;
                             powerTimerStartTime = now;
                             screenMessage = "RESTART IN 20s\nTAP ACT9: CANCEL";
@@ -2261,28 +2456,39 @@ void loop() {
                             setKeyLED(id, strip.Color(255, 140, 0), 1000);
                             layer4Act9TapCount = 0;
                             layer4Act9PressStartTime = 0;
-                            layer4Act9HoldTriggered = true; // prevent hold trigger immediately after 4th tap
+                            layer4Act9HoldTriggered = true;
                           } else {
-                            // Regular tap feedback & event
                             setKeyLED(id, strip.Color(0, 255, 0), 100);
                             sendPayload("{\"device\":\"macropad\", \"layer\":4, \"action\":\"macro\", \"index\":9, \"label\":\"ACT 9\", \"tap_count\":" + String(layer4Act9TapCount) + "}");
                             addDeviceLog("INP", "MACRO", ("Key #9 (ACT 9, Tap " + String(layer4Act9TapCount) + "/4)").c_str());
                           }
                         }
                       } else {
-                        if (isScreenBlackTestActive) {
-                          isScreenBlackTestActive = false;
-                          requestScreenUpdate(true, 50);
+                        bool isHoldKey = (currentHoldMask & (1 << (dynIdx - 1))) != 0;
+                        if (isHoldKey) {
+                          macroKeyPressTime[dynIdx] = now;
+                          macroKeyHoldTriggered[dynIdx] = false;
+                        } else {
+                          macroKeyPressTime[dynIdx] = 0;
+                          macroKeyHoldTriggered[dynIdx] = false;
+                          if (isScreenBlackTestActive) {
+                            isScreenBlackTestActive = false;
+                            requestScreenUpdate(true, 50);
+                          }
+                          if (screenMessage != "") {
+                            screenMessage = ""; 
+                            screenMessageDismissTime = 0;
+                            requestScreenUpdate(false, 300);
+                          }
+                          String lbl = gridLabels[dynIdx - 1];
+                          String cleanLbl = lbl;
+                          cleanLbl.replace("\"", "'");
+                          cleanLbl.replace("\r", "");
+                          cleanLbl.replace("\n", " ");
+                          sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"macro\", \"index\":" + String(dynIdx) + ", \"label\":\"" + cleanLbl + "\"}");
+                          addDeviceLog("INP", "MACRO", ("Key #" + String(dynIdx) + " (" + cleanLbl + ")").c_str());
+                          setKeyLED(id, strip.Color(0, 255, 0), 100);
                         }
-                        if (screenMessage != "") {
-                          screenMessage = ""; 
-                          screenMessageDismissTime = 0;
-                          requestScreenUpdate(false, 300);
-                        }
-                        String lbl = gridLabels[dynIdx - 1];
-                        sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"macro\", \"index\":" + String(dynIdx) + ", \"label\":\"" + lbl + "\"}");
-                        addDeviceLog("INP", "MACRO", ("Key #" + String(dynIdx) + " (" + lbl + ")").c_str());
-                        setKeyLED(id, strip.Color(0, 255, 0), 100);
                       }
                     }
                   }
@@ -2326,7 +2532,8 @@ void loop() {
       layer4Act9HoldTriggered = false;
     }
 
-    // Check 3x3 dynamic keys under modifier for long-press save and short-tap recall
+    // Check 3x3 dynamic keys under modifier for long-press save and short-tap recall,
+    // AND check keys with hold_mask for radial menu / hold actions (macro_hold & macro_release)
     for (int k = 1; k <= 9; k++) {
       int keyId = dynIdxToKeyID[k];
       
@@ -2341,6 +2548,16 @@ void loop() {
         }
       }
       
+      // If currently physically pressed down without modifier: check for hold / radial menu trigger
+      if (currentScanState[keyId] && !isModifierHeld && !isAudioModifierHeld && deviceMode != MODE_DEBUG) {
+        if (macroKeyPressTime[k] > 0 && !macroKeyHoldTriggered[k] && (now - macroKeyPressTime[k] >= MACRO_HOLD_TRIGGER_MS)) {
+          macroKeyHoldTriggered[k] = true;
+          sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"macro_hold\", \"index\":" + String(k) + "}");
+          addDeviceLog("INP", "HOLD", ("Radial/Hold Open: Key #" + String(k)).c_str());
+          setKeyLED(keyId, strip.Color(0, 200, 255), 350); // Cyan glow while held
+        }
+      }
+
       // If key was just released
       if (lastState[keyId] && !currentScanState[keyId]) {
         if (dynKeyPressTime[k] > 0) {
@@ -2352,6 +2569,36 @@ void loop() {
           }
           dynKeyPressTime[k] = 0;
           dynKeyHeld[k] = false;
+        }
+
+        if (macroKeyPressTime[k] > 0) {
+          if (macroKeyHoldTriggered[k]) {
+            // Was held -> send macro_release to close radial menu or release hold
+            sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"macro_release\", \"index\":" + String(k) + "}");
+            addDeviceLog("INP", "HOLD", ("Radial/Hold Release: Key #" + String(k)).c_str());
+            setKeyLED(keyId, strip.Color(0, 0, 0), 1);
+          } else {
+            // Was released before hold threshold (< 250ms) -> treat as regular tap
+            if (isScreenBlackTestActive) {
+              isScreenBlackTestActive = false;
+              requestScreenUpdate(true, 50);
+            }
+            if (screenMessage != "") {
+              screenMessage = ""; 
+              screenMessageDismissTime = 0;
+              requestScreenUpdate(false, 300);
+            }
+            String lbl = gridLabels[k - 1];
+            String cleanLbl = lbl;
+            cleanLbl.replace("\"", "'");
+            cleanLbl.replace("\r", "");
+            cleanLbl.replace("\n", " ");
+            sendPayload("{\"device\":\"macropad\", \"layer\":" + String(currentLayer) + ", \"action\":\"macro\", \"index\":" + String(k) + ", \"label\":\"" + cleanLbl + "\"}");
+            addDeviceLog("INP", "MACRO", ("Key #" + String(k) + " (" + cleanLbl + ")").c_str());
+            setKeyLED(keyId, strip.Color(0, 255, 0), 100);
+          }
+          macroKeyPressTime[k] = 0;
+          macroKeyHoldTriggered[k] = false;
         }
       }
     }
@@ -2439,10 +2686,27 @@ void loop() {
         key13Held = false;
       }
     }
+
+    // Check Key 9 (Left-Middle Fixed Key) for Short Tap (Mode Cycle) vs Long Hold (420ms -> Status HUD)
+    if (currentScanState[9]) {
+      key9LastSeenTime = now;
+      if (key9PressTime > 0 && !key9LongTriggered && (now - key9PressTime >= KEY9_HOLD_HUD_MS)) {
+        key9LongTriggered = true;
+        toggleHud();
+      }
+    } else if (key9PressTime > 0 && (now - key9LastSeenTime > 45)) {
+      if (!key9LongTriggered) {
+        // Physical Key 9 toggles Status/Battery HUD peek (mode switching handled in Web Dashboard)
+        toggleHud();
+      }
+      key9PressTime = 0;
+      key9LongTriggered = false;
+    }
     
     for (int i = 1; i <= 16; i++) lastState[i] = currentScanState[i];
     
-    if (totalActiveKeys > 0 || key5PhysicallyPressed || key13PhysicallyPressed) isPollingMatrix = true; 
+    bool anyKey9Pending = (key9PressTime > 0);
+    if (totalActiveKeys > 0 || key5PhysicallyPressed || key13PhysicallyPressed || anyKey9Pending) isPollingMatrix = true; 
     else {
       isPollingMatrix = false; 
       setMatrixIdle();         

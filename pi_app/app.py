@@ -16,6 +16,8 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.responses import HTMLResponse, PlainTextResponse, JSONResponse
 from pydantic import BaseModel
 
+from layer_manager import layer_manager
+
 # ==============================================================================
 # CONFIGURATION
 # ==============================================================================
@@ -92,6 +94,12 @@ device_state: Dict[str, Any] = {
     "bank": 1,
     "slot": 1,
     "layer": 1,
+    "mode": "automode",
+    "auto_app_mode": layer_manager.auto_app_mode,
+    "pc_bridge_online": False,
+    "focused_app_exe": "",
+    "focused_app_title": "",
+    "active_app_rule": None,
     "modifier": False,
     "reset_reason": "Unknown",
     "screen_msg": "",
@@ -352,9 +360,16 @@ def on_mqtt_message(client, userdata, msg):
         modifier = payload.get("modifier", False)
         device_state["modifier"] = modifier
         if "layer" in payload:
-            device_state["layer"] = payload["layer"]
-            device_state["bank"] = ((payload["layer"] - 1) // 4) + 1
-            device_state["slot"] = ((payload["layer"] - 1) % 4) + 1
+            new_l = payload["layer"]
+            device_state["layer"] = new_l
+            device_state["bank"] = ((new_l - 1) // 4) + 1
+            device_state["slot"] = ((new_l - 1) % 4) + 1
+            if action in ["layer_change", "layer_reset"] or (action == "encoder_click" and "bank" in payload):
+                if not (int(new_l) == 2 and device_state.get("in_call")):
+                    layer_payload = layer_manager.build_mqtt_payload(new_l, fast=True)
+                    if layer_payload:
+                        mqtt_client.publish(TOPIC_DISPLAY, json.dumps(layer_payload))
+                        add_log_entry("DISPLAY", "ICONS", f"Auto-synced Layer {new_l} layout & icons to MacroPad")
 
         if action == "macro":
             idx = payload.get("index")
@@ -395,6 +410,37 @@ def on_mqtt_message(client, userdata, msg):
             mac = payload.get("mac", "d4:93:90:3b:f0:89")
             add_log_entry("INPUT", "WOL", f"Wake-on-LAN Magic Packet sent to {mac}", raw_topic=topic, raw_payload=payload)
 
+        elif action == "auto_app_mode":
+            enabled = bool(payload.get("enabled", False))
+            layer_manager.save_app_rules_config({"auto_app_mode": enabled})
+            device_state["auto_app_mode"] = enabled
+            mqtt_client.publish("macropad/config_sync", json.dumps({"action": "reload_config", "auto_app_mode": enabled}))
+            mode_str = "🤖 AUTO-APP MODE (Dynamic App Tracking)" if enabled else "🎛️ MANUAL BANK/LAYER MODE"
+            add_log_entry("SYSTEM", "MODE", f"Key 9 tapped -> {mode_str}", raw_topic=topic, raw_payload=payload)
+            if enabled:
+                rule = layer_manager.match_app_rule(device_state.get("focused_app_exe", ""), device_state.get("focused_app_title", ""))
+                if rule:
+                    target_l = int(rule.get("target_layer") or rule.get("layer") or 1)
+                    if not (target_l == 2 and device_state.get("in_call")):
+                        layer_payload = layer_manager.build_mqtt_payload(target_l, fast=False)
+                        if layer_payload:
+                            mqtt_client.publish(TOPIC_DISPLAY, json.dumps(layer_payload), retain=False)
+                            device_state["layer"] = target_l
+                            device_state["bank"] = ((target_l - 1) // 4) + 1
+                            device_state["slot"] = ((target_l - 1) % 4) + 1
+                            device_state["grid_labels"] = layer_payload["labels"]
+                            add_log_entry("SYSTEM", "AUTO-APP", f"🤖 Auto-App Mode enabled while in '{rule.get('name')}' -> Switched to Layer {target_l}")
+
+        elif action == "mode_change":
+            m = str(payload.get("mode", "automode")).lower()
+            is_auto = (m in ("auto", "automode"))
+            device_state["mode"] = m
+            device_state["auto_app_mode"] = is_auto
+            layer_manager.save_app_rules_config({"auto_app_mode": is_auto, "device_mode": m})
+            mqtt_client.publish("macropad/config_sync", json.dumps({"action": "reload_config", "mode": m, "auto_app_mode": is_auto}))
+            add_log_entry("SYSTEM", "MODE", f"MacroPad Key 9 switched Mode -> {m.upper()}", raw_topic=topic, raw_payload=payload)
+            broadcast_state()
+
         elif action == "notification_ack":
             add_log_entry("NOTIF", "ACK", "🔔 MacroPad alert acknowledged by user", raw_topic=topic, raw_payload=payload)
             try:
@@ -428,15 +474,28 @@ def on_mqtt_message(client, userdata, msg):
             device_state["heap"] = int(payload["heap"])
         if "min_heap" in payload:
             device_state["min_heap"] = int(payload["min_heap"])
+        prev_uptime = device_state.get("uptime_ms", 0)
         if "uptime" in payload:
-            device_state["uptime_ms"] = int(payload["uptime"])
-            device_state["uptime_str"] = format_uptime(int(payload["uptime"]))
+            curr_uptime = int(payload["uptime"])
+            device_state["uptime_ms"] = curr_uptime
+            device_state["uptime_str"] = format_uptime(curr_uptime)
+            # If device just booted (uptime < 15s and reset or first seen), auto-push active layer icons
+            if curr_uptime < 15000 and (prev_uptime == 0 or curr_uptime < prev_uptime):
+                cur_l = int(payload.get("layer", 1))
+                layer_payload = layer_manager.build_mqtt_payload(cur_l, fast=False)
+                if layer_payload:
+                    mqtt_client.publish(TOPIC_DISPLAY, json.dumps(layer_payload))
+                    add_log_entry("DISPLAY", "BOOT_SYNC", f"Auto-restored Layer {cur_l} layout & icons on boot")
         if "bank" in payload:
             device_state["bank"] = int(payload["bank"])
         if "slot" in payload:
             device_state["slot"] = int(payload["slot"])
         if "layer" in payload:
             device_state["layer"] = int(payload["layer"])
+        if "auto_app_mode" in payload:
+            device_state["auto_app_mode"] = bool(payload["auto_app_mode"])
+        if "mode" in payload:
+            device_state["mode"] = str(payload["mode"])
         if "reset_reason" in payload:
             device_state["reset_reason"] = str(payload["reset_reason"])
 
@@ -464,6 +523,8 @@ def on_mqtt_message(client, userdata, msg):
 
     # 4. DISPLAY / SCREEN UPDATES
     elif topic == TOPIC_DISPLAY:
+        if "in_call" in payload:
+            device_state["in_call"] = bool(payload["in_call"])
         if "popup" in payload:
             device_state["screen_msg"] = payload["popup"]
             add_log_entry("DISPLAY", "POPUP", f"Screen Popup: \"{payload['popup']}\"", raw_topic=topic, raw_payload=payload)
@@ -479,7 +540,37 @@ def on_mqtt_message(client, userdata, msg):
             device_state["layer"] = int(payload["layer"])
             device_state["bank"] = ((payload["layer"] - 1) // 4) + 1
             device_state["slot"] = ((payload["layer"] - 1) % 4) + 1
+        if "auto_app_mode" in payload:
+            device_state["auto_app_mode"] = bool(payload["auto_app_mode"])
         broadcast_state()
+
+    # 5. PC BRIDGE TELEMETRY & FOCUSED WINDOW STREAM
+    elif topic == "macropad/pc_telemetry":
+        exe = payload.get("exe", "")
+        title = payload.get("title", "")
+        device_state["pc_bridge_online"] = True
+        device_state["focused_app_exe"] = exe
+        device_state["focused_app_title"] = title
+        rule = layer_manager.match_app_rule(exe, title)
+        if rule:
+            target_l = int(rule.get("target_layer") or rule.get("layer") or 1)
+            device_state["active_app_rule"] = f"{rule.get('name')} -> L{target_l}"
+            if device_state.get("auto_app_mode") and device_state.get("layer") != target_l:
+                if not (target_l == 2 and device_state.get("in_call")):
+                    layer_payload = layer_manager.build_mqtt_payload(target_l, fast=False)
+                    if layer_payload:
+                        mqtt_client.publish(TOPIC_DISPLAY, json.dumps(layer_payload), retain=False)
+                        device_state["layer"] = target_l
+                        device_state["bank"] = ((target_l - 1) // 4) + 1
+                        device_state["slot"] = ((target_l - 1) % 4) + 1
+                        device_state["grid_labels"] = layer_payload["labels"]
+                        add_log_entry("SYSTEM", "AUTO-APP", f"🤖 Focused '{rule.get('name')}' ({exe}) -> Auto-switched MacroPad to Layer {target_l}")
+        else:
+            device_state["active_app_rule"] = payload.get("matched_rule", "")
+        broadcast_state()
+
+    elif topic == "macropad/config_sync":
+        pass
 
     else:
         add_log_entry("INFO", "MQTT", f"[{topic}] {payload_str}", raw_topic=topic, raw_payload=payload)
@@ -775,13 +866,120 @@ async def send_popup(req: PopupRequest):
 async def set_layer(req: LayerRequest):
     payload = {}
     if req.layer is not None:
-        payload["layer"] = req.layer
+        payload = layer_manager.build_mqtt_payload(req.layer, fast=True)
+        if not payload:
+            payload = {"layer": req.layer}
     elif req.bank is not None:
         payload["bank"] = req.bank
     if payload:
         mqtt_client.publish(TOPIC_DISPLAY, json.dumps(payload))
-        add_log_entry("DISPLAY", "CONFIG", f"Web Dashboard sent layer config: {payload}")
+        add_log_entry("DISPLAY", "CONFIG", f"Switched MacroPad to Layer {req.layer or req.bank}")
     return {"status": "sent", "payload": payload}
+
+# ------------------------------------------------------------------------------
+# LAYER, BUTTON, RADIAL & APP AUTO-SWITCH STORE API
+# ------------------------------------------------------------------------------
+@app.get("/api/layers")
+async def get_all_layers():
+    return {
+        "current_layer": device_state.get("layer", 1),
+        "mode": device_state.get("mode", "automode"),
+        "auto_app_mode": device_state.get("auto_app_mode", True),
+        "layers": layer_manager.get_all_layers(),
+        "icons": layer_manager.get_icons(),
+        "app_rules_config": layer_manager.get_app_rules_config()
+    }
+
+@app.get("/api/layers/{layer_id}")
+async def get_layer_by_id(layer_id: int):
+    layer = layer_manager.get_layer(layer_id)
+    if not layer:
+        raise HTTPException(status_code=404, detail="Layer not found")
+    return layer
+
+@app.post("/api/layers/{layer_id}")
+async def save_layer_by_id(layer_id: int, data: Dict[str, Any]):
+    layer_manager.save_layer(layer_id, data)
+    mqtt_client.publish("macropad/config_sync", json.dumps({"action": "reload_config", "layer_id": layer_id}))
+    if device_state.get("layer") == layer_id:
+        payload = layer_manager.build_mqtt_payload(layer_id, fast=True)
+        if payload:
+            mqtt_client.publish(TOPIC_DISPLAY, json.dumps(payload))
+    add_log_entry("SYSTEM", "CONFIG", f"Saved Layer {layer_id} ('{data.get('name', '')}') & synced to PC Bridge")
+    return {"status": "saved", "layer": layer_manager.get_layer(layer_id)}
+
+@app.delete("/api/layers/{layer_id}")
+async def delete_layer_by_id(layer_id: int):
+    ok = layer_manager.delete_layer(layer_id)
+    mqtt_client.publish("macropad/config_sync", json.dumps({"action": "reload_config"}))
+    return {"status": "deleted" if ok else "not_found"}
+
+@app.post("/api/layers/{layer_id}/apply")
+async def apply_layer_to_pad(layer_id: int, fast: bool = False):
+    payload = layer_manager.build_mqtt_payload(layer_id, fast=fast)
+    if not payload:
+        raise HTTPException(status_code=404, detail="Layer not found or empty")
+    mqtt_client.publish(TOPIC_DISPLAY, json.dumps(payload))
+    add_log_entry("DISPLAY", "LAYER", f"Web Dashboard pushed Layer {layer_id} icons, labels & hold_mask to MacroPad")
+    return {"status": "applied", "payload": payload}
+
+@app.get("/api/app_rules")
+async def get_app_rules():
+    cfg = layer_manager.get_app_rules_config()
+    cfg["focused_app_exe"] = device_state.get("focused_app_exe", "")
+    cfg["focused_app_title"] = device_state.get("focused_app_title", "")
+    return cfg
+
+@app.post("/api/app_rules")
+async def save_app_rules(data: Dict[str, Any]):
+    layer_manager.save_app_rules_config(data)
+    device_state["auto_app_mode"] = layer_manager.auto_app_mode
+    mqtt_client.publish(TOPIC_DISPLAY, json.dumps({"auto_app_mode": layer_manager.auto_app_mode}))
+    mqtt_client.publish("macropad/config_sync", json.dumps({"action": "reload_config", "auto_app_mode": layer_manager.auto_app_mode}))
+    add_log_entry("SYSTEM", "AUTO-APP", f"Saved {len(layer_manager.app_rules)} App Tracking Rules (Auto-App Mode: {'ON' if layer_manager.auto_app_mode else 'OFF'})")
+    broadcast_state()
+    return {"status": "saved", "config": layer_manager.get_app_rules_config()}
+
+@app.post("/api/auto_app_mode/toggle")
+async def toggle_auto_app_mode():
+    new_val = not layer_manager.auto_app_mode
+    layer_manager.save_app_rules_config({"auto_app_mode": new_val})
+    device_state["auto_app_mode"] = new_val
+    mode_str = "automode" if new_val else "manual"
+    device_state["mode"] = mode_str
+    mqtt_client.publish(TOPIC_DISPLAY, json.dumps({"auto_app_mode": new_val, "mode": mode_str}))
+    mqtt_client.publish("macropad/config_sync", json.dumps({"action": "reload_config", "auto_app_mode": new_val, "mode": mode_str}))
+    add_log_entry("SYSTEM", "MODE", f"Web Dashboard toggled Mode -> {mode_str.upper()}")
+    broadcast_state()
+    return {"status": "ok", "auto_app_mode": new_val, "mode": mode_str}
+
+@app.post("/api/set_mode")
+async def set_device_mode(req: Dict[str, Any]):
+    mode = req.get("mode", "automode").lower()
+    is_auto = (mode in ("auto", "automode"))
+    layer_manager.save_app_rules_config({"auto_app_mode": is_auto, "device_mode": mode})
+    device_state["mode"] = mode
+    device_state["auto_app_mode"] = is_auto
+    mqtt_client.publish(TOPIC_DISPLAY, json.dumps({"mode": mode, "auto_app_mode": is_auto}))
+    mqtt_client.publish("macropad/config_sync", json.dumps({"action": "reload_config", "mode": mode, "auto_app_mode": is_auto}))
+    add_log_entry("SYSTEM", "MODE", f"Web Hub set Device Mode -> {mode.upper()}")
+    broadcast_state()
+    return {"status": "ok", "mode": mode, "auto_app_mode": is_auto}
+
+@app.get("/api/icons")
+async def get_icons_library():
+    return layer_manager.get_icons()
+
+@app.post("/api/icons")
+async def add_custom_icon_entry(data: Dict[str, Any]):
+    name = data.get("name")
+    w = data.get("w", 24)
+    h = data.get("h", 24)
+    hex_str = data.get("hex", "")
+    if not name or not hex_str:
+        raise HTTPException(status_code=400, detail="Missing icon name or hex string")
+    layer_manager.add_custom_icon(name, w, h, hex_str)
+    return {"status": "saved", "icon": layer_manager.get_icons().get(name)}
 
 @app.post("/api/publish")
 async def publish_custom(req: PublishRequest):
@@ -937,7 +1135,7 @@ HTML_CONTENT = """<!DOCTYPE html>
   main {
     flex: 1;
     display: grid;
-    grid-template-columns: 1fr 380px;
+    grid-template-columns: 1fr 480px;
     overflow: hidden;
   }
 
@@ -1187,35 +1385,44 @@ HTML_CONTENT = """<!DOCTYPE html>
 
 <header>
   <div class="title-group">
+    <a href="/" style="background:rgba(56,189,248,0.12); border:1px solid var(--accent-cyan); color:var(--accent-cyan); text-decoration:none; padding:5px 10px; border-radius:6px; font-weight:700; font-size:11px; display:flex; align-items:center; gap:5px;">⬅ WYSIWYG Studio</a>
     <div class="brand-icon">⚡</div>
     <div>
-      <h1>MacroPad Hub <span id="device-badge" class="badge-state state-offline"><span class="pulse-dot"></span><span id="state-text">OFFLINE</span></span></h1>
+      <h1>MacroPad Debug &amp; Telemetry <span id="device-badge" class="badge-state state-offline"><span class="pulse-dot"></span><span id="state-text">OFFLINE</span></span></h1>
     </div>
   </div>
 
   <div class="telemetry-row">
-    <div class="metric-item">
-      <span class="metric-label">Battery Voltage</span>
-      <span class="metric-val green" id="metric-vbat">-- V</span>
+    <div class="metric-item" onclick="toggleAutoAppModeUI()" style="cursor:pointer;" title="Click (or tap Key 9 on Pad) to toggle between Dynamic Auto-App Mode and Manual Layer Mode">
+      <span class="metric-label">Key 9 Mode</span>
+      <span class="metric-val cyan" id="metric-auto-app">🎛️ MANUAL</span>
     </div>
-    <div class="metric-item">
-      <span class="metric-label">Estimated SoC</span>
-      <span class="metric-val cyan" id="metric-pct">-- %</span>
-    </div>
-    <div class="metric-item">
-      <span class="metric-label">WiFi RSSI</span>
-      <span class="metric-val" id="metric-rssi">-- dBm</span>
+    <div class="metric-item" title="Live foreground application reported by Windows PC Bridge">
+      <span class="metric-label">Focused PC App</span>
+      <span class="metric-val magenta" id="metric-pc-app">--</span>
     </div>
     <div class="metric-item">
       <span class="metric-label">Active Layer</span>
       <span class="metric-val amber" id="metric-layer">Bank 1 | L1</span>
     </div>
     <div class="metric-item">
+      <span class="metric-label">Battery</span>
+      <span class="metric-val green" id="metric-vbat">-- V</span>
+    </div>
+    <div class="metric-item">
+      <span class="metric-label">SoC</span>
+      <span class="metric-val cyan" id="metric-pct">-- %</span>
+    </div>
+    <div class="metric-item">
+      <span class="metric-label">WiFi</span>
+      <span class="metric-val" id="metric-rssi">-- dBm</span>
+    </div>
+    <div class="metric-item">
       <span class="metric-label">Uptime</span>
       <span class="metric-val" id="metric-uptime">0s</span>
     </div>
     <div class="metric-item" onclick="toggleStayAwake()" style="cursor:pointer;" title="Click to toggle Stay Awake / Sleep mode">
-      <span class="metric-label">Power Mode</span>
+      <span class="metric-label">Power</span>
       <span class="metric-val green" id="metric-stay-awake">⚡ AWAKE 24/7</span>
     </div>
   </div>
@@ -1239,6 +1446,7 @@ HTML_CONTENT = """<!DOCTYPE html>
         <button class="btn-icon" id="btn-autoscroll" title="Auto-scroll toggle">⚡ Scroll: ON</button>
         <button class="btn-icon" id="btn-clear" title="Clear view">Clear</button>
         <a href="/api/export_logs" class="btn-icon" style="text-decoration:none;" download>Export</a>
+        <a href="http://192.168.1.58" target="_blank" class="btn-icon" style="text-decoration:none; color:var(--accent-cyan);" title="Open ESP32 Hardware/OTA Page">ESP32 OTA ↗</a>
       </div>
     </div>
 
@@ -1247,10 +1455,247 @@ HTML_CONTENT = """<!DOCTYPE html>
     </div>
   </section>
 
-  <!-- SIDEBAR CONTROLS & BENCHMARK -->
+  <!-- UNIFIED CONTROL SURFACE SIDEBAR (PC BRIDGE + PI HUB + DEVICE) -->
   <aside class="sidebar-section">
 
-    <!-- 1. BATTERY CAPACITY BENCHMARKER -->
+    <!-- 1. AUTO-APP MODE & WINDOW TRACKER STUDIO (KEY 9) -->
+    <div class="card" id="auto-app-card" style="border-color:#26354d;">
+      <div class="card-title">
+        <span>🤖 Auto-App Mode &amp; Tracked Apps (Key 9)</span>
+        <span id="auto-app-badge" class="badge-state state-offline" style="font-size:9px; padding:1px 6px; cursor:pointer;" onclick="toggleAutoAppModeUI()">MANUAL MODE</span>
+      </div>
+
+      <div style="background:#0d131d; border:1px solid #1e293b; border-radius:4px; padding:7px 9px; display:flex; align-items:center; justify-content:space-between; gap:8px;">
+        <div style="overflow:hidden;">
+          <div style="font-size:9px; color:var(--text-dim); text-transform:uppercase; font-weight:700;">Live Focused Windows App (PC Bridge):</div>
+          <div id="live-focused-banner" style="font-family:var(--font-mono); font-size:11px; color:var(--accent-cyan); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Waiting for PC Bridge...</div>
+        </div>
+        <button class="btn btn-cyan" style="padding:4px 8px; font-size:10px; flex-shrink:0;" onclick="trackFocusedAppNow()">+ Track Focused</button>
+      </div>
+
+      <div style="display:flex; gap:8px; align-items:center; justify-content:space-between; background:#111822; padding:6px 8px; border-radius:4px; border:1px solid var(--border-color);">
+        <label style="display:flex; align-items:center; gap:6px; font-size:11px; color:#ddd; cursor:pointer;">
+          <input type="checkbox" id="chk-auto-app-mode" onchange="toggleAutoAppModeUI()" style="accent-color:var(--accent-green); cursor:pointer;">
+          <span><b>Auto-Switch Layer on App Focus</b> (Key 9 Tap)</span>
+        </label>
+        <select id="sel-untracked-behavior" class="input-field" style="width:145px; padding:3px 5px; font-size:10px;" title="What happens when you focus an app not in the list">
+          <option value="stay">Untracked: Keep Layer</option>
+          <option value="fallback">Untracked: Go to L1</option>
+        </select>
+      </div>
+
+      <!-- TOP-ROW HOLD MOUSE MODIFIERS (KEYS 1-4 MOD-TAP) -->
+      <div style="background:#0d131d; border:1px solid #1e293b; border-radius:4px; padding:6px 8px; display:flex; flex-direction:column; gap:5px;">
+        <div style="font-size:10px; color:var(--accent-amber); font-weight:700; display:flex; justify-content:space-between;">
+          <span>🧀 Top-Row Keys 1–4 Hold = Mouse Modifiers (Tap = Layer):</span>
+          <span style="font-size:9px; color:#889;">&ge;190ms Hold</span>
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:4px;">
+          <div>
+            <div style="font-size:9px; color:#ff66cc; font-family:var(--font-mono); margin-bottom:2px;">HOLD KEY 1</div>
+            <select id="top-mod-1" class="input-field" style="padding:2px 3px; font-size:10px;">
+              <option value="SHIFT">SHIFT</option>
+              <option value="ORBIT_CLUTCH">ORBIT (Shift+MMB)</option>
+              <option value="PAN_CLUTCH">PAN (MMB)</option>
+              <option value="CTRL">CTRL</option>
+              <option value="ALT">ALT</option>
+              <option value="SPACE">SPACE</option>
+            </select>
+          </div>
+          <div>
+            <div style="font-size:9px; color:var(--accent-cyan); font-family:var(--font-mono); margin-bottom:2px;">HOLD KEY 2</div>
+            <select id="top-mod-2" class="input-field" style="padding:2px 3px; font-size:10px;">
+              <option value="CTRL">CTRL</option>
+              <option value="SHIFT">SHIFT</option>
+              <option value="ORBIT_CLUTCH">ORBIT (Shift+MMB)</option>
+              <option value="PAN_CLUTCH">PAN (MMB)</option>
+              <option value="ALT">ALT</option>
+              <option value="SPACE">SPACE</option>
+            </select>
+          </div>
+          <div>
+            <div style="font-size:9px; color:var(--accent-amber); font-family:var(--font-mono); margin-bottom:2px;">HOLD KEY 3</div>
+            <select id="top-mod-3" class="input-field" style="padding:2px 3px; font-size:10px;">
+              <option value="ALT">ALT</option>
+              <option value="SHIFT">SHIFT</option>
+              <option value="CTRL">CTRL</option>
+              <option value="ORBIT_CLUTCH">ORBIT (Shift+MMB)</option>
+              <option value="PAN_CLUTCH">PAN (MMB)</option>
+              <option value="SPACE">SPACE</option>
+            </select>
+          </div>
+          <div>
+            <div style="font-size:9px; color:var(--accent-green); font-family:var(--font-mono); margin-bottom:2px;">HOLD KEY 4</div>
+            <select id="top-mod-4" class="input-field" style="padding:2px 3px; font-size:10px;">
+              <option value="ORBIT_CLUTCH">ORBIT (Shift+MMB)</option>
+              <option value="PAN_CLUTCH">PAN (MMB)</option>
+              <option value="SHIFT">SHIFT</option>
+              <option value="CTRL">CTRL</option>
+              <option value="ALT">ALT</option>
+              <option value="SPACE">SPACE</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div id="app-rules-list" style="display:flex; flex-direction:column; gap:5px;">
+        <!-- Populated dynamically -->
+      </div>
+
+      <div style="display:flex; gap:6px;">
+        <button class="btn btn-green" style="flex:1;" onclick="saveAppRulesConfig()">💾 Save App Rules &amp; Modifiers</button>
+        <button class="btn" onclick="addBlankAppRule()">+ Add App Rule</button>
+      </div>
+    </div>
+
+    <!-- 2. UNIFIED LAYER, BUTTON & RADIAL PIE MENU STUDIO -->
+    <div class="card" id="layer-studio-card" style="border-color:#26354d;">
+      <div class="card-title">
+        <span>🎨 Layer, Button &amp; Radial Studio</span>
+        <span style="font-size:9px; color:var(--accent-cyan);">Zero-Reflash Engine</span>
+      </div>
+
+      <div style="display:flex; gap:5px; align-items:center;">
+        <select id="layer-select" class="input-field" onchange="onLayerSelectChange()" style="flex:1;"></select>
+        <input type="text" id="layer-name-input" class="input-field" placeholder="Layer Name" style="width:130px;" title="Layer Display Name">
+        <button class="btn btn-cyan" onclick="applySelectedLayerToPad()" title="Save &amp; Push to MacroPad + PC Bridge">🚀 Push</button>
+      </div>
+
+      <div style="font-size:10px; color:#8b949e;">
+        Edit each button's <b>Label</b>, <b>Icon</b>, and <b>Tap Action</b> (`fusion:line`, `cad_cmd:L`, `hotkey:CTRL+Z`, `cad_key:ESC`). Click <b>⚙ Hold / Radial</b> on any key to configure its 3Dconnexion-style Radial Pie Menu!
+      </div>
+
+      <div id="layer-cells-editor" style="display:grid; grid-template-columns:repeat(3, 1fr); gap:6px;">
+        <!-- 9 cell editors generated dynamically -->
+      </div>
+
+      <!-- INLINE BUTTON BEHAVIOR & RADIAL PIE MENU DRAWER -->
+      <div id="radial-editor-drawer" style="display:none; background:#0b1019; border:1px solid var(--accent-cyan); border-radius:5px; padding:10px; flex-direction:column; gap:8px;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <span id="radial-drawer-title" style="font-size:11px; font-weight:700; color:var(--accent-cyan); text-transform:uppercase;">Configure Key #1</span>
+          <button class="btn" style="padding:2px 6px; font-size:10px;" onclick="closeRadialDrawer()">✕ Done</button>
+        </div>
+
+        <div style="display:flex; flex-direction:column; gap:4px;">
+          <span style="font-size:10px; color:#aaa; font-weight:600;">Quick Preset Tap Action:</span>
+          <select id="quick-action-preset" class="input-field" onchange="applyQuickActionPreset(this.value)" style="font-size:10px;">
+            <option value="">-- Choose a preset action to fill Tap Action --</option>
+            <optgroup label="Fusion 360 Native API (Zero Search Popup)">
+              <option value="fusion:line">Fusion: Line (fusion:line)</option>
+              <option value="fusion:rect_2pt">Fusion: 2-Point Rectangle (fusion:rect_2pt)</option>
+              <option value="fusion:rect_center">Fusion: Center Rectangle (fusion:rect_center)</option>
+              <option value="fusion:circle_center">Fusion: Circle (fusion:circle_center)</option>
+              <option value="fusion:arc_3pt">Fusion: 3-Point Arc (fusion:arc_3pt)</option>
+              <option value="fusion:poly_circum">Fusion: Polygon (fusion:poly_circum)</option>
+              <option value="fusion:spline_fit">Fusion: Fit Point Spline (fusion:spline_fit)</option>
+              <option value="fusion:dimension">Fusion: Sketch Dimension (fusion:dimension)</option>
+              <option value="fusion:offset">Fusion: Offset (fusion:offset)</option>
+              <option value="fusion:trim">Fusion: Trim (fusion:trim)</option>
+              <option value="fusion:extend">Fusion: Extend (fusion:extend)</option>
+              <option value="fusion:extrude">Fusion: Extrude (fusion:extrude)</option>
+              <option value="fusion:revolve">Fusion: Revolve (fusion:revolve)</option>
+              <option value="fusion:sweep">Fusion: Sweep (fusion:sweep)</option>
+              <option value="fusion:loft">Fusion: Loft (fusion:loft)</option>
+              <option value="fusion:hole">Fusion: Hole (fusion:hole)</option>
+              <option value="fusion:fillet">Fusion: Fillet 2D/3D (fusion:fillet)</option>
+              <option value="fusion:chamfer">Fusion: Chamfer (fusion:chamfer)</option>
+              <option value="fusion:shell">Fusion: Shell (fusion:shell)</option>
+              <option value="fusion:combine">Fusion: Combine (fusion:combine)</option>
+              <option value="fusion:split_body">Fusion: Split Body (fusion:split_body)</option>
+              <option value="fusion:move">Fusion: Move/Copy (fusion:move)</option>
+              <option value="fusion:mirror">Fusion: Mirror 2D/3D (fusion:mirror)</option>
+              <option value="fusion:rect_pattern">Fusion: Rectangular Pattern (fusion:rect_pattern)</option>
+              <option value="fusion:circ_pattern">Fusion: Circular Pattern (fusion:circ_pattern)</option>
+              <option value="fusion:joint">Fusion: Joint (fusion:joint)</option>
+              <option value="fusion:offset_plane">Fusion: Offset Plane (fusion:offset_plane)</option>
+              <option value="fusion:measure">Fusion: Measure (fusion:measure)</option>
+              <option value="fusion:parameters">Fusion: Change Parameters (fusion:parameters)</option>
+              <option value="fusion_view:fit">Fusion View: Fit Viewport (fusion_view:fit)</option>
+              <option value="fusion_view:home">Fusion View: Home Isometric (fusion_view:home)</option>
+              <option value="fusion_view:top">Fusion View: Top View (fusion_view:top)</option>
+              <option value="fusion_view:front">Fusion View: Front View (fusion_view:front)</option>
+              <option value="fusion_view:right">Fusion View: Right View (fusion_view:right)</option>
+            </optgroup>
+            <optgroup label="Keyboard Shortcuts / Hotkeys (Photoshop / General)">
+              <option value="cad_key:ESC">ESC / Cancel / Back Out (cad_key:ESC)</option>
+              <option value="hotkey:CTRL+Z">Undo (hotkey:CTRL+Z)</option>
+              <option value="hotkey:CTRL+SHIFT+Z">Redo (hotkey:CTRL+SHIFT+Z)</option>
+              <option value="hotkey:CTRL+S">Save (hotkey:CTRL+S)</option>
+              <option value="hotkey:CTRL+C">Copy (hotkey:CTRL+C)</option>
+              <option value="hotkey:CTRL+V">Paste (hotkey:CTRL+V)</option>
+              <option value="hotkey:CTRL+T">Free Transform (hotkey:CTRL+T)</option>
+              <option value="hotkey:CTRL+D">Deselect (hotkey:CTRL+D)</option>
+              <option value="hotkey:B">Brush Key 'B' (hotkey:B)</option>
+              <option value="hotkey:V">Move Key 'V' (hotkey:V)</option>
+              <option value="hotkey:E">Eraser Key 'E' (hotkey:E)</option>
+              <option value="hotkey:L">Lasso Key 'L' (hotkey:L)</option>
+              <option value="hotkey:W">Magic Wand 'W' (hotkey:W)</option>
+            </optgroup>
+            <optgroup label="AutoCAD Command Line">
+              <option value="cad_cmd:L">AutoCAD: LINE (cad_cmd:L)</option>
+              <option value="cad_cmd:PL">AutoCAD: PLINE (cad_cmd:PL)</option>
+              <option value="cad_cmd:REC">AutoCAD: RECTANGLE (cad_cmd:REC)</option>
+              <option value="cad_cmd:C">AutoCAD: CIRCLE (cad_cmd:C)</option>
+              <option value="cad_cmd:TR">AutoCAD: TRIM (cad_cmd:TR)</option>
+              <option value="cad_cmd:O">AutoCAD: OFFSET (cad_cmd:O)</option>
+              <option value="cad_cmd:DIM">AutoCAD: DIM (cad_cmd:DIM)</option>
+              <option value="cad_cmd:Z E">AutoCAD: ZOOM EXTENTS (cad_cmd:Z E)</option>
+            </optgroup>
+          </select>
+        </div>
+
+        <div style="display:flex; align-items:center; justify-content:space-between; background:#111822; padding:6px 8px; border-radius:4px; border:1px solid var(--border-color);">
+          <label style="display:flex; align-items:center; gap:6px; font-size:11px; color:#fff; cursor:pointer;">
+            <input type="checkbox" id="chk-cell-hold-enabled" onchange="onCellHoldToggle()" style="accent-color:var(--accent-cyan); cursor:pointer;">
+            <span><b>Enable Hold Radial Pie Menu</b> (Hold &ge; 260ms)</span>
+          </label>
+          <input type="text" id="inp-radial-title" class="input-field" placeholder="Center Title" style="width:120px; padding:3px 6px; font-size:10px;" onchange="onRadialMetaChange()">
+        </div>
+
+        <div id="radial-slices-box" style="display:flex; flex-direction:column; gap:5px;">
+          <!-- Slices populated dynamically -->
+        </div>
+
+        <div style="display:flex; gap:6px;">
+          <button class="btn btn-cyan" style="flex:1; font-size:10px; padding:4px;" onclick="addRadialSliceRow()">+ Add Radial Slice</button>
+          <button class="btn btn-green" style="flex:1; font-size:10px; padding:4px;" onclick="saveCurrentLayerConfig()">💾 Save Key &amp; Layer</button>
+        </div>
+      </div>
+
+      <div style="display:flex; gap:6px;">
+        <button class="btn btn-green" onclick="saveCurrentLayerConfig()" style="flex:1;">💾 Save Layer &amp; Sync All</button>
+        <button class="btn" onclick="createNewLayerPrompt()">+ New Layer</button>
+      </div>
+    </div>
+
+    <!-- 3. HARDWARE 4x4 MATRIX VISUALIZER -->
+    <div class="card">
+      <div class="card-title">
+        <span>🎛️ Live 4x4 Key Matrix</span>
+        <span id="visualizer-layer-tag" style="font-size:9px; color:var(--accent-amber);">B1:L1</span>
+      </div>
+      <div class="matrix-grid" id="matrix-visualizer">
+        <!-- 16 keys generated dynamically -->
+      </div>
+    </div>
+
+    <!-- 4. SMART HOME & HOME ASSISTANT QUICK ACTIONS -->
+    <div class="card">
+      <div class="card-title">
+        <span>💡 Home Assistant &amp; Quick Actions</span>
+        <span style="font-size:9px; color:var(--accent-green);">HASS MQTT</span>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn btn-amber" onclick="sendHassAction('light_toggle')">💡 Toggle Ceiling Light</button>
+        <button class="btn btn-cyan" onclick="sendHassAction('wakeonlan')">⚡ WOL PC</button>
+        <button class="btn" onclick="sendHassAction('preset_recall', 1)">Preset 1</button>
+        <button class="btn" onclick="sendHassAction('preset_recall', 2)">Preset 2</button>
+        <button class="btn" onclick="sendHassAction('preset_recall', 3)">Preset 3</button>
+      </div>
+    </div>
+
+    <!-- 5. BATTERY CAPACITY BENCHMARKER -->
     <div class="card">
       <div class="card-title">
         <span>🔋 Battery Capacity Benchmarker</span>
@@ -1300,7 +1745,7 @@ HTML_CONTENT = """<!DOCTYPE html>
       </div>
     </div>
 
-    <!-- 2. WHATSAPP 24/7 LINKED DEVICE BRIDGE -->
+    <!-- 6. WHATSAPP 24/7 LINKED DEVICE BRIDGE -->
     <div class="card" id="whatsapp-card">
       <div class="card-title">
         <span>📱 WhatsApp 24/7 Bridge</span>
@@ -1319,7 +1764,7 @@ HTML_CONTENT = """<!DOCTYPE html>
       </div>
 
       <!-- Quick Triggers Config Accordion -->
-      <details style="font-size:11px; color:#888; cursor:pointer;" id="wa-config-details" open>
+      <details style="font-size:11px; color:#888; cursor:pointer;" id="wa-config-details">
         <summary style="font-weight:600; color:var(--text-main); margin-bottom:6px;">⚙️ VIP Triggers &amp; Settings</summary>
         <div style="display:flex; flex-direction:column; gap:6px; margin-top:6px;">
           
@@ -1367,7 +1812,7 @@ HTML_CONTENT = """<!DOCTYPE html>
       </details>
     </div>
 
-    <!-- 3. BATTERY DISCHARGE HISTORY & SQLITE DATABASE -->
+    <!-- 7. BATTERY DISCHARGE HISTORY & SQLITE DATABASE -->
     <div class="card">
       <div class="card-title">
         <span>📈 Battery History &amp; Discharge Trend</span>
@@ -1396,13 +1841,13 @@ HTML_CONTENT = """<!DOCTYPE html>
       </div>
     </div>
 
-    <!-- 3. WHATSAPP & PUSH NOTIFICATION DISPATCHER -->
+    <!-- 8. WHATSAPP & PUSH NOTIFICATION DISPATCHER -->
     <div class="card">
       <div class="card-title">
         <span>💬 Manual Notification Dispatcher</span>
         <span style="font-size:9px; color:var(--accent-cyan);">Instant &lt;50ms</span>
       </div>
-      <div style="font-size:11px; color:#888;">Triggers visual LED rotating effects & caller banner on MacroPad:</div>
+      <div style="font-size:11px; color:#888;">Triggers visual LED rotating effects &amp; caller banner on MacroPad:</div>
       
       <div class="btn-row">
         <button class="btn btn-green" onclick="sendTestNotify('call', 'whatsapp', 'Mom', 'Incoming WhatsApp Call')">📞 WhatsApp Call</button>
@@ -1414,33 +1859,6 @@ HTML_CONTENT = """<!DOCTYPE html>
         <input type="text" id="custom-sender" class="input-field" placeholder="Sender name (e.g. John)" style="width:45%;">
         <input type="text" id="custom-msg" class="input-field" placeholder="Message / Title">
         <button class="btn btn-magenta" onclick="sendCustomNotify()">Send</button>
-      </div>
-    </div>
-
-    <!-- 3. SMART HOME & HOME ASSISTANT QUICK ACTIONS -->
-    <div class="card">
-      <div class="card-title">
-        <span>💡 Home Assistant & Quick Actions</span>
-        <span style="font-size:9px; color:var(--accent-green);">HASS MQTT</span>
-      </div>
-
-      <div class="btn-row">
-        <button class="btn btn-amber" onclick="sendHassAction('light_toggle')">💡 Toggle Ceiling Light</button>
-        <button class="btn btn-cyan" onclick="sendHassAction('wakeonlan')">⚡ WOL PC</button>
-        <button class="btn" onclick="sendHassAction('preset_recall', 1)">Preset 1</button>
-        <button class="btn" onclick="sendHassAction('preset_recall', 2)">Preset 2</button>
-        <button class="btn" onclick="sendHassAction('preset_recall', 3)">Preset 3</button>
-      </div>
-    </div>
-
-    <!-- 4. HARDWARE 4x4 MATRIX VISUALIZER -->
-    <div class="card">
-      <div class="card-title">
-        <span>🎛️ Live 4x4 Key Matrix</span>
-        <span id="visualizer-layer-tag" style="font-size:9px; color:var(--accent-amber);">B1:L1</span>
-      </div>
-      <div class="matrix-grid" id="matrix-visualizer">
-        <!-- 16 keys generated dynamically -->
       </div>
     </div>
 
@@ -1502,7 +1920,10 @@ HTML_CONTENT = """<!DOCTYPE html>
     };
   }
 
+  let latestDeviceState = {};
+
   function updateDeviceState(state) {
+    latestDeviceState = state || {};
     const badge = document.getElementById('device-badge');
     const badgeText = document.getElementById('state-text');
     badge.className = `badge-state state-${state.state || 'offline'}`;
@@ -1514,6 +1935,38 @@ HTML_CONTENT = """<!DOCTYPE html>
     document.getElementById('metric-layer').textContent = `Bank ${state.bank || 1} | L${state.layer || 1}`;
     document.getElementById('metric-uptime').textContent = state.uptime_str || '0s';
     document.getElementById('visualizer-layer-tag').textContent = `B${state.bank || 1}:L${state.layer || 1}`;
+
+    const isAuto = !!state.auto_app_mode;
+    const autoMetricEl = document.getElementById('metric-auto-app');
+    if (autoMetricEl) {
+      autoMetricEl.textContent = isAuto ? '🤖 AUTO-APP' : '🎛️ MANUAL';
+      autoMetricEl.className = `metric-val ${isAuto ? 'green' : 'cyan'}`;
+    }
+    const autoBadge = document.getElementById('auto-app-badge');
+    if (autoBadge) {
+      autoBadge.className = `badge-state ${isAuto ? 'state-online' : 'state-offline'}`;
+      autoBadge.textContent = isAuto ? 'AUTO-APP ON' : 'MANUAL MODE';
+    }
+    const chkAuto = document.getElementById('chk-auto-app-mode');
+    if (chkAuto) chkAuto.checked = isAuto;
+
+    const fExe = state.focused_exe || state.focused_app_exe || '';
+    const fTitle = state.focused_title || state.focused_app_title || '';
+    const fMatch = state.matched_rule || state.active_app_rule || '';
+
+    const pcAppEl = document.getElementById('metric-pc-app');
+    if (pcAppEl) {
+      pcAppEl.textContent = fExe || '--';
+    }
+    const bannerEl = document.getElementById('live-focused-banner');
+    if (bannerEl) {
+      if (fExe) {
+        const matchTag = fMatch ? ` → [${fMatch}]` : '';
+        bannerEl.textContent = `${fExe} | "${fTitle}"${matchTag}`;
+      } else {
+        bannerEl.textContent = 'Waiting for PC Bridge...';
+      }
+    }
 
     const stayEl = document.getElementById('metric-stay-awake');
     if (stayEl) {
@@ -1837,6 +2290,470 @@ HTML_CONTENT = """<!DOCTYPE html>
     }
   }
 
+  // =========================================================================
+  // UNIFIED AUTO-APP RULES, LAYER, BUTTON & RADIAL PIE MENU STUDIO
+  // =========================================================================
+  let layerStoreData = {};
+  let iconsLibraryData = {};
+  let appRulesConfig = { auto_app_mode: false, untracked_behavior: 'stay', fallback_layer: 1, rules: [] };
+  let activeSelectedLayerId = "13";
+  let activeDrawerCellIdx = null;
+
+  async function loadLayerStore() {
+    try {
+      const res = await fetch('/api/layers');
+      const data = await res.json();
+      layerStoreData = data.layers || {};
+      iconsLibraryData = data.icons || {};
+      appRulesConfig = data.app_rules_config || { auto_app_mode: false, untracked_behavior: 'stay', fallback_layer: 1, rules: [] };
+
+      const sel = document.getElementById('layer-select');
+      sel.innerHTML = '';
+      Object.keys(layerStoreData).sort((a, b) => Number(a) - Number(b)).forEach(lid => {
+        const lObj = layerStoreData[lid];
+        const opt = document.createElement('option');
+        opt.value = lid;
+        opt.textContent = `Layer ${lid}: ${lObj.name || 'Custom'}`;
+        sel.appendChild(opt);
+      });
+      if (!layerStoreData[activeSelectedLayerId]) {
+        activeSelectedLayerId = Object.keys(layerStoreData)[0] || "1";
+      }
+      sel.value = activeSelectedLayerId;
+
+      renderAppRules();
+      renderLayerEditor();
+    } catch (e) {
+      console.error('Error loading layer store:', e);
+    }
+  }
+
+  // ---- Auto-App Mode & Tracked Apps Studio ----
+  function renderAppRules() {
+    const chk = document.getElementById('chk-auto-app-mode');
+    if (chk) chk.checked = !!appRulesConfig.auto_app_mode;
+
+    const selUntracked = document.getElementById('sel-untracked-behavior');
+    if (selUntracked) selUntracked.value = appRulesConfig.untracked_behavior || 'stay';
+
+    const topMods = appRulesConfig.top_modifiers || { "1": "SHIFT", "2": "CTRL", "3": "ALT", "4": "ORBIT_CLUTCH" };
+    for (let s = 1; s <= 4; s++) {
+      const mEl = document.getElementById(`top-mod-${s}`);
+      if (mEl && topMods[String(s)]) {
+        mEl.value = topMods[String(s)];
+      }
+    }
+
+    const listEl = document.getElementById('app-rules-list');
+    if (!listEl) return;
+    listEl.innerHTML = '';
+
+    const rules = appRulesConfig.rules || appRulesConfig.app_rules || [];
+    appRulesConfig.rules = rules;
+    const layerOpts = Object.keys(layerStoreData).sort((a, b) => Number(a) - Number(b));
+
+    rules.forEach((rule, idx) => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex; gap:4px; align-items:center; background:#0c111d; border:1px solid var(--border-color); border-radius:4px; padding:4px 6px;';
+      const tLayer = rule.target_layer || rule.layer || 1;
+      const mPat = rule.exe_match || rule.match || '';
+
+      const lSelectHtml = layerOpts.map(lid => {
+        const lName = (layerStoreData[lid] && layerStoreData[lid].name) || `Layer ${lid}`;
+        const selAttr = Number(tLayer) === Number(lid) ? 'selected' : '';
+        return `<option value="${lid}" ${selAttr}>L${lid}: ${escapeHtml(lName)}</option>`;
+      }).join('');
+
+      row.innerHTML = `
+        <input type="checkbox" id="rule-en-${idx}" ${rule.enabled !== false ? 'checked' : ''} style="accent-color:var(--accent-green); cursor:pointer;" title="Enable rule">
+        <input type="text" id="rule-name-${idx}" class="input-field" value="${escapeHtml(rule.name || '')}" placeholder="App Name" style="width:95px; padding:3px 5px; font-size:10px;">
+        <input type="text" id="rule-match-${idx}" class="input-field" value="${escapeHtml(mPat)}" placeholder="exe or title (e.g. fusion360)" style="flex:1; padding:3px 5px; font-size:10px;">
+        <select id="rule-layer-${idx}" class="input-field" style="width:130px; padding:3px 4px; font-size:10px;">
+          ${lSelectHtml}
+        </select>
+        <button class="btn btn-red" style="padding:2px 6px; font-size:10px;" onclick="removeAppRule(${idx})" title="Delete rule">✕</button>
+      `;
+      listEl.appendChild(row);
+    });
+  }
+
+  function collectAppRulesFromDOM() {
+    const rules = appRulesConfig.rules || appRulesConfig.app_rules || [];
+    const updated = [];
+    for (let idx = 0; idx < rules.length; idx++) {
+      const enEl = document.getElementById(`rule-en-${idx}`);
+      const nameEl = document.getElementById(`rule-name-${idx}`);
+      const matchEl = document.getElementById(`rule-match-${idx}`);
+      const layerEl = document.getElementById(`rule-layer-${idx}`);
+      if (!nameEl || !matchEl || !layerEl) continue;
+      updated.push({
+        id: rules[idx].id || `rule_${Date.now()}_${idx}`,
+        enabled: enEl ? enEl.checked : true,
+        name: nameEl.value.trim() || 'App',
+        exe_match: matchEl.value.trim().toLowerCase(),
+        title_match: rules[idx].title_match || '',
+        target_layer: parseInt(layerEl.value, 10) || 1
+      });
+    }
+    appRulesConfig.rules = updated;
+    appRulesConfig.app_rules = updated;
+
+    const topMods = {};
+    for (let s = 1; s <= 4; s++) {
+      const mEl = document.getElementById(`top-mod-${s}`);
+      if (mEl) topMods[String(s)] = mEl.value;
+    }
+    appRulesConfig.top_modifiers = topMods;
+
+    const chk = document.getElementById('chk-auto-app-mode');
+    if (chk) appRulesConfig.auto_app_mode = chk.checked;
+    const selUntracked = document.getElementById('sel-untracked-behavior');
+    if (selUntracked) appRulesConfig.untracked_behavior = selUntracked.value;
+  }
+
+  function addBlankAppRule(prefillExe = '', prefillName = '') {
+    collectAppRulesFromDOM();
+    appRulesConfig.rules.push({
+      id: `rule_${Date.now()}`,
+      enabled: true,
+      name: prefillName || 'New App',
+      exe_match: prefillExe || 'app.exe',
+      title_match: '',
+      target_layer: parseInt(activeSelectedLayerId, 10) || 1
+    });
+    renderAppRules();
+  }
+
+  function removeAppRule(idx) {
+    collectAppRulesFromDOM();
+    appRulesConfig.rules.splice(idx, 1);
+    renderAppRules();
+  }
+
+  function trackFocusedAppNow() {
+    const exe = (latestDeviceState.focused_exe || latestDeviceState.focused_app_exe || '').toLowerCase();
+    if (!exe) {
+      alert('No focused PC app detected yet — make sure macropad_bridge.py is running on your PC!');
+      return;
+    }
+    const cleanName = exe.replace('.exe', '').toUpperCase();
+    addBlankAppRule(exe, cleanName);
+  }
+
+  async function saveAppRulesConfig() {
+    collectAppRulesFromDOM();
+    try {
+      const res = await fetch('/api/app_rules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(appRulesConfig)
+      });
+      if (res.ok) {
+        alert('✓ Auto-App Rules saved & synced to PC Bridge + MacroPad!');
+      }
+    } catch (e) {
+      alert('Failed to save app rules: ' + e);
+    }
+  }
+
+  async function toggleAutoAppModeUI() {
+    const current = !!latestDeviceState.auto_app_mode;
+    const nextState = !current;
+    try {
+      await fetch('/api/auto_app_mode/toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: nextState })
+      });
+      appRulesConfig.auto_app_mode = nextState;
+    } catch (e) {
+      console.error('Error toggling auto-app mode:', e);
+    }
+  }
+
+  // ---- Layer, Button & Radial Pie Menu Studio ----
+  function onLayerSelectChange() {
+    const sel = document.getElementById('layer-select');
+    activeSelectedLayerId = sel.value;
+    closeRadialDrawer();
+    renderLayerEditor();
+  }
+
+  function syncEditorDOMToLayerMemory() {
+    const layer = layerStoreData[activeSelectedLayerId];
+    if (!layer) return;
+    const nameInp = document.getElementById('layer-name-input');
+    if (nameInp && nameInp.value.trim()) {
+      layer.name = nameInp.value.trim();
+    }
+    if (!layer.cells) layer.cells = [];
+    for (let i = 0; i < 9; i++) {
+      const lblEl = document.getElementById(`cell-lbl-${i}`);
+      const icEl = document.getElementById(`cell-icon-${i}`);
+      const actEl = document.getElementById(`cell-act-${i}`);
+      if (!lblEl || !icEl || !actEl) continue;
+      const prev = layer.cells[i] || { index: i + 1 };
+      layer.cells[i] = {
+        ...prev,
+        index: i + 1,
+        label: lblEl.value.trim(),
+        icon: icEl.value,
+        action: actEl.value.trim()
+      };
+    }
+  }
+
+  function renderLayerEditor() {
+    const container = document.getElementById('layer-cells-editor');
+    container.innerHTML = '';
+    const layer = layerStoreData[activeSelectedLayerId];
+    if (!layer) return;
+
+    const nameInp = document.getElementById('layer-name-input');
+    if (nameInp) nameInp.value = layer.name || `Layer ${activeSelectedLayerId}`;
+
+    const cells = layer.cells || [];
+    const iconNames = ['', ...Object.keys(iconsLibraryData)];
+
+    for (let i = 0; i < 9; i++) {
+      const cell = cells[i] || { index: i + 1, label: `ACT ${i + 1}`, icon: '', action: '' };
+      const hasHold = !!cell.hold_enabled && Array.isArray(cell.radial_slices) && cell.radial_slices.length > 0;
+      const isSelectedDrawer = (activeDrawerCellIdx === i);
+
+      const box = document.createElement('div');
+      box.style.cssText = `background:#0c111d; border:1px solid ${isSelectedDrawer ? 'var(--accent-cyan)' : (hasHold ? '#1e4631' : 'var(--border-color)')}; border-radius:4px; padding:6px; display:flex; flex-direction:column; gap:4px;`;
+
+      let optsHtml = iconNames.map(ic => {
+        const selected = (cell.icon === ic) ? 'selected' : '';
+        const label = ic === '' ? '(Text Only)' : `🖼 ${ic}`;
+        return `<option value="${ic}" ${selected}>${label}</option>`;
+      }).join('');
+
+      const holdBadgeText = hasHold ? `🎡 ${cell.radial_slices.length} Slices` : `⚙ Hold / Radial`;
+      const holdBtnStyle = hasHold
+        ? 'background:rgba(0,255,102,0.14); color:var(--accent-green); border-color:var(--accent-green);'
+        : 'background:#141c2b; color:#9aa4b2; border-color:#263246;';
+
+      box.innerHTML = `
+        <div style="font-size:9px; color:#8b949e; font-family:var(--font-mono); display:flex; justify-content:space-between; align-items:center;">
+          <span style="font-weight:700; color:#cdd9e5;">KEY #${i + 1}</span>
+          <button class="btn" style="padding:1px 5px; font-size:9px; ${holdBtnStyle}" onclick="openRadialDrawer(${i})">${holdBadgeText}</button>
+        </div>
+        <input type="text" id="cell-lbl-${i}" class="input-field" value="${escapeHtml(cell.label || '')}" placeholder="OLED Label" style="padding:3px 5px; font-size:10px; font-weight:700;">
+        <select id="cell-icon-${i}" class="input-field" style="padding:2px 4px; font-size:10px;">
+          ${optsHtml}
+        </select>
+        <input type="text" id="cell-act-${i}" class="input-field" value="${escapeHtml(cell.action || '')}" placeholder="Tap Action (e.g. fusion:line)" style="padding:3px 5px; font-size:9px; color:var(--accent-cyan);" title="Tap Action: fusion:<id>, cad_cmd:<cmd>, hotkey:<keys>, cad_key:<key>">
+      `;
+      container.appendChild(box);
+    }
+  }
+
+  function openRadialDrawer(cellIdx) {
+    syncEditorDOMToLayerMemory();
+    activeDrawerCellIdx = cellIdx;
+    const layer = layerStoreData[activeSelectedLayerId];
+    if (!layer || !layer.cells) return;
+    const cell = layer.cells[cellIdx] || { index: cellIdx + 1, label: `ACT ${cellIdx + 1}` };
+
+    const drawer = document.getElementById('radial-editor-drawer');
+    drawer.style.display = 'flex';
+    document.getElementById('radial-drawer-title').textContent = `Key #${cellIdx + 1} (${cell.label || 'Button'}) — Tap Preset & Hold Radial Menu`;
+    document.getElementById('quick-action-preset').value = '';
+    document.getElementById('chk-cell-hold-enabled').checked = !!cell.hold_enabled;
+    document.getElementById('inp-radial-title').value = cell.radial_title || cell.label || `KEY ${cellIdx + 1}`;
+
+    renderRadialSlices();
+    renderLayerEditor();
+  }
+
+  function closeRadialDrawer() {
+    activeDrawerCellIdx = null;
+    const drawer = document.getElementById('radial-editor-drawer');
+    if (drawer) drawer.style.display = 'none';
+    renderLayerEditor();
+  }
+
+  function applyQuickActionPreset(presetVal) {
+    if (!presetVal || activeDrawerCellIdx === null) return;
+    const actEl = document.getElementById(`cell-act-${activeDrawerCellIdx}`);
+    if (actEl) {
+      actEl.value = presetVal;
+      syncEditorDOMToLayerMemory();
+    }
+  }
+
+  function onCellHoldToggle() {
+    if (activeDrawerCellIdx === null) return;
+    const layer = layerStoreData[activeSelectedLayerId];
+    const cell = layer.cells[activeDrawerCellIdx];
+    cell.hold_enabled = document.getElementById('chk-cell-hold-enabled').checked;
+    if (cell.hold_enabled && (!Array.isArray(cell.radial_slices) || cell.radial_slices.length === 0)) {
+      cell.radial_slices = [
+        { label: "Option 1", sub: "Top", color: "#00b4d8", action: cell.action || "fusion:line" },
+        { label: "Option 2", sub: "Right", color: "#0096c7", action: "cad_key:ESC" },
+        { label: "Option 3", sub: "Bottom", color: "#48cae4", action: "hotkey:CTRL+Z" },
+        { label: "Option 4", sub: "Left", color: "#5e60ce", action: "fusion_view:fit" }
+      ];
+    }
+    renderRadialSlices();
+    renderLayerEditor();
+  }
+
+  function onRadialMetaChange() {
+    if (activeDrawerCellIdx === null) return;
+    const layer = layerStoreData[activeSelectedLayerId];
+    const cell = layer.cells[activeDrawerCellIdx];
+    cell.radial_title = document.getElementById('inp-radial-title').value.trim();
+  }
+
+  function collectRadialSlicesFromDOM() {
+    if (activeDrawerCellIdx === null) return;
+    const layer = layerStoreData[activeSelectedLayerId];
+    const cell = layer.cells[activeDrawerCellIdx];
+    const slices = cell.radial_slices || [];
+    const updated = [];
+    for (let s = 0; s < slices.length; s++) {
+      const lbl = document.getElementById(`slice-lbl-${s}`);
+      const sub = document.getElementById(`slice-sub-${s}`);
+      const act = document.getElementById(`slice-act-${s}`);
+      const col = document.getElementById(`slice-col-${s}`);
+      if (!lbl || !act) continue;
+      updated.push({
+        label: lbl.value.trim() || `Slice ${s + 1}`,
+        sub: sub ? sub.value.trim() : '',
+        action: act.value.trim(),
+        color: col ? col.value.trim() : '#00b4d8'
+      });
+    }
+    cell.radial_slices = updated;
+  }
+
+  function renderRadialSlices() {
+    const box = document.getElementById('radial-slices-box');
+    box.innerHTML = '';
+    if (activeDrawerCellIdx === null) return;
+    const layer = layerStoreData[activeSelectedLayerId];
+    const cell = layer.cells[activeDrawerCellIdx];
+    const slices = cell.radial_slices || [];
+
+    if (slices.length === 0) {
+      box.innerHTML = `<div style="font-size:10px; color:#778;">No radial slices yet. Enable Hold Radial or click "+ Add Radial Slice".</div>`;
+      return;
+    }
+
+    slices.forEach((sl, sIdx) => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex; gap:4px; align-items:center; background:#111824; padding:4px 6px; border-radius:4px; border:1px solid #223046;';
+      row.innerHTML = `
+        <span style="font-size:9px; color:var(--accent-cyan); font-family:var(--font-mono); width:16px;">#${sIdx + 1}</span>
+        <input type="text" id="slice-lbl-${sIdx}" class="input-field" value="${escapeHtml(sl.label || '')}" placeholder="Slice Label" style="width:95px; padding:2px 5px; font-size:10px;" onchange="collectRadialSlicesFromDOM()">
+        <input type="text" id="slice-sub-${sIdx}" class="input-field" value="${escapeHtml(sl.sub || '')}" placeholder="Subtitle" style="width:75px; padding:2px 5px; font-size:10px;" onchange="collectRadialSlicesFromDOM()">
+        <input type="text" id="slice-act-${sIdx}" class="input-field" value="${escapeHtml(sl.action || '')}" placeholder="Action (fusion:.. / hotkey:..)" style="flex:1; padding:2px 5px; font-size:10px; color:var(--accent-cyan);" onchange="collectRadialSlicesFromDOM()">
+        <input type="color" id="slice-col-${sIdx}" value="${sl.color || '#00b4d8'}" style="width:22px; height:22px; border:none; background:none; cursor:pointer;" onchange="collectRadialSlicesFromDOM()">
+        <button class="btn btn-red" style="padding:2px 5px; font-size:9px;" onclick="removeRadialSliceRow(${sIdx})">✕</button>
+      `;
+      box.appendChild(row);
+    });
+  }
+
+  function addRadialSliceRow() {
+    if (activeDrawerCellIdx === null) return;
+    collectRadialSlicesFromDOM();
+    const layer = layerStoreData[activeSelectedLayerId];
+    const cell = layer.cells[activeDrawerCellIdx];
+    cell.hold_enabled = true;
+    document.getElementById('chk-cell-hold-enabled').checked = true;
+    if (!Array.isArray(cell.radial_slices)) cell.radial_slices = [];
+    cell.radial_slices.push({
+      label: `Slice ${cell.radial_slices.length + 1}`,
+      sub: "Action",
+      color: "#00b4d8",
+      action: "fusion:line"
+    });
+    renderRadialSlices();
+    renderLayerEditor();
+  }
+
+  function removeRadialSliceRow(sIdx) {
+    if (activeDrawerCellIdx === null) return;
+    collectRadialSlicesFromDOM();
+    const layer = layerStoreData[activeSelectedLayerId];
+    const cell = layer.cells[activeDrawerCellIdx];
+    if (Array.isArray(cell.radial_slices)) {
+      cell.radial_slices.splice(sIdx, 1);
+    }
+    renderRadialSlices();
+    renderLayerEditor();
+  }
+
+  async function saveCurrentLayerConfig() {
+    syncEditorDOMToLayerMemory();
+    if (activeDrawerCellIdx !== null) {
+      collectRadialSlicesFromDOM();
+      onRadialMetaChange();
+    }
+    const layer = layerStoreData[activeSelectedLayerId];
+    if (!layer) return;
+
+    try {
+      const res = await fetch(`/api/layers/${activeSelectedLayerId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(layer)
+      });
+      if (res.ok) {
+        await loadLayerStore();
+      }
+    } catch (e) {
+      alert('Failed to save layer: ' + e);
+    }
+  }
+
+  async function applySelectedLayerToPad() {
+    await saveCurrentLayerConfig();
+    try {
+      const res = await fetch(`/api/layers/${activeSelectedLayerId}/apply`, { method: 'POST' });
+      if (res.ok) {
+        console.log(`Layer ${activeSelectedLayerId} pushed to MacroPad`);
+      }
+    } catch (e) {
+      alert('Error pushing layer to MacroPad: ' + e);
+    }
+  }
+
+  async function createNewLayerPrompt() {
+    const idStr = prompt('Enter new Layer number (1..16):');
+    if (!idStr) return;
+    const lid = parseInt(idStr, 10);
+    if (isNaN(lid) || lid < 1) return alert('Invalid layer number');
+    const name = prompt('Enter Layer Name (e.g. Blender, Premiere, Spotify):', `Layer ${lid}`) || `Layer ${lid}`;
+
+    const newLayer = {
+      id: lid,
+      name: name,
+      bank: Math.floor((lid - 1) / 4) + 1,
+      slot: ((lid - 1) % 4) + 1,
+      cells: Array.from({ length: 9 }, (_, i) => ({
+        index: i + 1,
+        label: i === 8 ? 'ESC' : `ACT ${i + 1}`,
+        icon: i === 8 ? 'back' : '',
+        action: i === 8 ? 'cad_key:ESC' : `macro_${i + 1}`,
+        hold_enabled: false,
+        radial_title: '',
+        radial_slices: []
+      }))
+    };
+
+    await fetch(`/api/layers/${lid}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newLayer)
+    });
+    activeSelectedLayerId = String(lid);
+    await loadLayerStore();
+  }
+
   window.onload = () => {
     initMatrixVisualizer();
     connectWebSocket();
@@ -1844,6 +2761,7 @@ HTML_CONTENT = """<!DOCTYPE html>
     loadWhatsAppConfig();
     loadRecentWhatsAppChats();
     loadBatteryHistory();
+    loadLayerStore();
     setInterval(loadBatteryHistory, 30000);
   };
 </script>
@@ -1851,8 +2769,14 @@ HTML_CONTENT = """<!DOCTYPE html>
 </html>
 """
 
+from studio_ui import STUDIO_HTML_CONTENT
+
 @app.get("/", response_class=HTMLResponse)
-async def serve_dashboard():
+async def serve_studio():
+    return STUDIO_HTML_CONTENT
+
+@app.get("/debug", response_class=HTMLResponse)
+async def serve_debug_dashboard():
     return HTML_CONTENT
 
 # ==============================================================================

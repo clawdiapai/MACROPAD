@@ -1,0 +1,13 @@
+{
+	"autodeskProduct":	"Fusion360",
+	"type":	"addin",
+	"id":	"e8c42b10-9a7d-4f3b-8e21-macropad36001",
+	"author":	"Uzzo MacroPad",
+	"description":	{
+		"":	"Native zero-latency command & SpaceMouse radial menu bridge for the ESP32 E-Ink MacroPad."
+	},
+	"version":	"1.0.0",
+	"runOnStartup":	true,
+	"supportedOS":	"windows|mac",
+	"editEnabled":	true
+}

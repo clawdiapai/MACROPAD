@@ -266,7 +266,7 @@ class DiscordVoiceRPC:
             logger.warning(f"Could not save token file: {e}")
 
     # =========================================================================
-    # VOICE SETTINGS (MIC MUTE)
+    # VOICE SETTINGS (MIC MUTE & DEAFEN)
     # =========================================================================
     def set_mute(self, muted: bool) -> bool:
         """Explicitly sets Discord mute state to True or False"""
@@ -284,6 +284,20 @@ class DiscordVoiceRPC:
         """Toggles the current Discord mute state"""
         target = not self.is_muted
         return self.set_mute(target)
+
+    def toggle_deafen(self) -> bool:
+        """Toggles Discord deafen state via RPC"""
+        if not self.is_authenticated:
+            return False
+        target = not getattr(self, "is_deaf", False)
+        self.is_deaf = target
+        logger.info(f"Setting Discord Deafen via RPC -> {target}")
+        self._send_raw(1, {
+            "cmd": "SET_VOICE_SETTINGS",
+            "args": {"deaf": target},
+            "nonce": str(uuid.uuid4())
+        })
+        return target
 
     # =========================================================================
     # VOICE CALL & CALL MEMBERS
@@ -307,6 +321,8 @@ class DiscordVoiceRPC:
             vol = round(s.get("volume", 100))
             is_self = bool(self.current_user_id and uid == self.current_user_id)
             is_bot = u.get("bot", False)
+            local_mute = bool(s.get("mute", False))
+            remote_mute = bool(s.get("voice_state", {}).get("mute", False) or s.get("voice_state", {}).get("self_mute", False))
 
             members.append({
                 "id": uid,
@@ -314,13 +330,35 @@ class DiscordVoiceRPC:
                 "volume": vol,
                 "is_self": is_self,
                 "bot": is_bot,
-                "mute": s.get("mute", False) or s.get("voice_state", {}).get("mute", False) or s.get("voice_state", {}).get("self_mute", False),
+                "local_mute": local_mute,
+                "mute": local_mute or (self.is_muted if is_self else remote_mute),
                 "speaking": False
             })
 
         # Sort order: other humans first, bots second, current user last
         members.sort(key=lambda m: (1 if m["is_self"] else 0, 1 if m["bot"] else 0, m["name"].lower()))
         return members
+
+    def _subscribe_channel_events(self, channel_id: Optional[str]):
+        """Subscribes to live voice state changes in the active voice channel (excluding speaking indicators for e-ink longevity)"""
+        old_cid = getattr(self, "_subscribed_channel_id", None)
+        if old_cid and old_cid != channel_id:
+            for evt in ("VOICE_STATE_CREATE", "VOICE_STATE_UPDATE", "VOICE_STATE_DELETE"):
+                self._send_raw(1, {
+                    "cmd": "UNSUBSCRIBE",
+                    "evt": evt,
+                    "args": {"channel_id": old_cid},
+                    "nonce": str(uuid.uuid4())
+                })
+        self._subscribed_channel_id = channel_id
+        if channel_id:
+            for evt in ("VOICE_STATE_CREATE", "VOICE_STATE_UPDATE", "VOICE_STATE_DELETE"):
+                self._send_raw(1, {
+                    "cmd": "SUBSCRIBE",
+                    "evt": evt,
+                    "args": {"channel_id": channel_id},
+                    "nonce": str(uuid.uuid4())
+                })
 
     def refresh_voice_channel(self) -> Optional[dict]:
         """Fetches the current voice channel and updates active members"""
@@ -335,14 +373,17 @@ class DiscordVoiceRPC:
         if not self._running:
             op, res = self._read_raw()
             if res and res.get("data") and res["data"].get("id"):
+                cid = res["data"]["id"]
                 members = self.parse_members(res["data"])
                 self.voice_channel = {
-                    "id": res["data"]["id"],
+                    "id": cid,
                     "name": res["data"].get("name", "Voice Call"),
                     "members": members
                 }
+                self._subscribe_channel_events(cid)
             else:
                 self.voice_channel = None
+                self._subscribe_channel_events(None)
             return self.voice_channel
         return self.voice_channel
 
@@ -365,6 +406,24 @@ class DiscordVoiceRPC:
                     m["volume"] = target_int
                     break
         return target_int
+
+    def set_user_mute(self, user_id: str, muted: bool) -> bool:
+        """Mutes or unmutes a specific Discord call member locally via RPC"""
+        if not self.is_authenticated:
+            return False
+        logger.info(f"Setting User {user_id} Local Mute -> {muted}")
+        self._send_raw(1, {
+            "cmd": "SET_USER_VOICE_SETTINGS",
+            "args": {"user_id": user_id, "mute": bool(muted)},
+            "nonce": str(uuid.uuid4())
+        })
+        if self.voice_channel and "members" in self.voice_channel:
+            for m in self.voice_channel["members"]:
+                if m["id"] == user_id:
+                    m["local_mute"] = bool(muted)
+                    m["mute"] = bool(muted)
+                    break
+        return True
 
     # =========================================================================
     # EVENT LISTENER LOOP
@@ -393,6 +452,7 @@ class DiscordVoiceRPC:
                 # 1. Voice Settings Update (Mic Mute / Deafen)
                 if cmd == "DISPATCH" and evt == "VOICE_SETTINGS_UPDATE":
                     new_mute = data.get("mute", False)
+                    self.is_deaf = data.get("deaf", getattr(self, "is_deaf", False))
                     if new_mute != self.is_muted:
                         self.is_muted = new_mute
                         logger.info(f"Discord event: Mute state changed -> {'MUTED' if new_mute else 'LIVE'}")
@@ -404,32 +464,43 @@ class DiscordVoiceRPC:
                     channel_id = data.get("channel_id")
                     if channel_id:
                         logger.info(f"Discord joined voice channel: {channel_id}. Fetching members...")
-                        # Query selected voice channel to get member list
+                        self._subscribe_channel_events(channel_id)
                         self._send_raw(1, {"cmd": "GET_SELECTED_VOICE_CHANNEL", "nonce": str(uuid.uuid4())})
                     else:
                         logger.info("Discord left voice channel.")
+                        self._subscribe_channel_events(None)
                         self.voice_channel = None
                         if self.on_voice_channel_update:
                             self.on_voice_channel_update(None)
 
+                # 2b. Live Voice State Updates inside the active call
+                elif cmd == "DISPATCH" and evt in ("VOICE_STATE_CREATE", "VOICE_STATE_UPDATE", "VOICE_STATE_DELETE"):
+                    if self.voice_channel and self.voice_channel.get("id"):
+                        self._send_raw(1, {"cmd": "GET_SELECTED_VOICE_CHANNEL", "nonce": str(uuid.uuid4())})
+
                 # 3. Channel Info Response (from GET_SELECTED_VOICE_CHANNEL)
                 elif cmd == "GET_SELECTED_VOICE_CHANNEL":
                     if data and data.get("id"):
+                        cid = data["id"]
+                        if getattr(self, "_subscribed_channel_id", None) != cid:
+                            self._subscribe_channel_events(cid)
                         members = self.parse_members(data)
                         self.voice_channel = {
-                            "id": data["id"],
+                            "id": cid,
                             "name": data.get("name", "Voice Call"),
                             "members": members
                         }
                         logger.info(f"Voice call active: {self.voice_channel['name']} ({len(members)} members)")
                     else:
                         self.voice_channel = None
+                        self._subscribe_channel_events(None)
                     if self.on_voice_channel_update:
                         self.on_voice_channel_update(self.voice_channel)
 
                 # 4. Voice Setting command acks
                 elif cmd == "SET_VOICE_SETTINGS":
                     new_mute = data.get("mute", self.is_muted)
+                    self.is_deaf = data.get("deaf", getattr(self, "is_deaf", False))
                     if new_mute != self.is_muted:
                         self.is_muted = new_mute
                         logger.info(f"Discord SET_VOICE_SETTINGS ack -> {'MUTED' if new_mute else 'LIVE'}")
@@ -440,10 +511,14 @@ class DiscordVoiceRPC:
                 elif cmd == "SET_USER_VOICE_SETTINGS":
                     uid = data.get("user_id")
                     vol = round(data.get("volume", 100))
+                    muted = data.get("mute")
                     if self.voice_channel and "members" in self.voice_channel:
                         for m in self.voice_channel["members"]:
                             if m["id"] == uid:
                                 m["volume"] = vol
+                                if muted is not None:
+                                    m["local_mute"] = bool(muted)
+                                    m["mute"] = bool(muted)
                                 break
 
             except Exception as e:

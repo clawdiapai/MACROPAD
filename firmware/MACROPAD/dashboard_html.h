@@ -203,6 +203,14 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
       </div>
     </div>
     <div class="card">
+      <div class="card-h"><span>Operating Mode</span><span id="m-cur-mode" style="color:var(--green); font-weight:700;">AUTOMODE</span></div>
+      <div class="ctrl-row">
+        <button id="btn-m-auto" class="btn" style="flex:1; border-color:var(--green); color:var(--green);" onclick="setMode('automode')">Auto</button>
+        <button id="btn-m-manual" class="btn" style="flex:1;" onclick="setMode('manual')">Manual</button>
+        <button id="btn-m-debug" class="btn" style="flex:1; border-color:var(--amber); color:var(--amber);" onclick="setMode('debug')">Debug</button>
+      </div>
+    </div>
+    <div class="card">
       <div class="card-h">System Controls</div>
       <div class="ctrl-row">
         <button class="btn" style="flex:1; border-color:var(--amber); color:var(--amber);" onclick="testDeepSleep()">Test Deep Sleep</button>
@@ -315,6 +323,22 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
         } else {
           pop.style.display = 'none';
         }
+
+        // Mode telemetry
+        if (s.mode) {
+          const m = s.mode.toLowerCase();
+          const modeEl = document.getElementById('m-cur-mode');
+          if (modeEl) {
+            modeEl.innerText = m.toUpperCase();
+            modeEl.style.color = (m === 'automode' || m === 'auto') ? 'var(--green)' : (m === 'debug' ? 'var(--amber)' : 'var(--cyan)');
+          }
+          const bAuto = document.getElementById('btn-m-auto');
+          const bMan = document.getElementById('btn-m-manual');
+          const bDbg = document.getElementById('btn-m-debug');
+          if (bAuto) bAuto.style.background = (m === 'automode' || m === 'auto') ? 'rgba(0,255,102,0.2)' : '';
+          if (bMan) bMan.style.background = (m === 'manual') ? 'rgba(0,243,255,0.2)' : '';
+          if (bDbg) bDbg.style.background = (m === 'debug') ? 'rgba(255,184,0,0.2)' : '';
+        }
       })
       .catch(() => {});
 
@@ -375,6 +399,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
 
   function setBank(b) {
     fetch(`/api/set_layer?bank=${b}`, { method: 'POST' });
+  }
+
+  function setMode(m) {
+    fetch(`/api/set_mode?mode=${m}`, { method: 'POST' }).then(() => pollData());
   }
 
   function testDeepSleep() {
