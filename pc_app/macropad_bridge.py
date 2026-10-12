@@ -534,7 +534,7 @@ def enqueue_keystroke(fn, *args, **kwargs):
 
 def sync_config_from_hub():
     """Fetches the latest layers, button actions, radial pie slices, icons, and auto-app rules from the Pi Hub."""
-    global synced_layers_store, synced_icons_library, synced_app_rules
+    global synced_layers_store, synced_icons_library, synced_app_rules, force_app_reeval
     try:
         import urllib.request
         url = f"http://{MQTT_BROKER}:5000/api/layers"
@@ -547,6 +547,7 @@ def sync_config_from_hub():
                     synced_icons_library = data["icons"]
                 if "app_rules_config" in data:
                     synced_app_rules = data["app_rules_config"]
+            force_app_reeval = True
             logger.info(f"[Hub Sync] Loaded {len(synced_layers_store)} layers, {len(synced_icons_library)} icons & {len(synced_app_rules.get('rules', []))} app rules (auto_app_mode={synced_app_rules.get('auto_app_mode')})")
     except Exception as e:
         logger.warning(f"[Hub Sync] Could not fetch config from {MQTT_BROKER}:5000: {e}")
@@ -1821,6 +1822,7 @@ TOPIC_PC_TELEMETRY = "macropad/pc_telemetry"
 force_app_reeval = False
 
 def on_connect(client, userdata, flags, rc, properties=None):
+    global force_app_reeval
     if rc == 0:
         logger.info(f"Connected to MQTT broker at {MQTT_BROKER}")
         client.subscribe([(TOPIC_INPUT, 0), (TOPIC_STATUS, 0), (TOPIC_CONFIG_SYNC, 0)])
@@ -1830,6 +1832,7 @@ def on_connect(client, userdata, flags, rc, properties=None):
         # Sync current mic status, voice call status, and Unified Hub config store
         publish_mic_state(is_discord_muted)
         publish_voice_call_state()
+        force_app_reeval = True
         threading.Thread(target=sync_config_from_hub, daemon=True).start()
     else:
         logger.error(f"MQTT connection failed with code {rc}")
@@ -2239,11 +2242,18 @@ def _load_local_tdx_harvested():
 
 _load_local_tdx_harvested()
 
+EXE_PROFILE_ALIASES = {
+    "opera.exe": "chrome.exe",
+    "brave.exe": "chrome.exe",
+    "vivaldi.exe": "chrome.exe",
+}
+
 def match_tdx_app_profile(exe_name: str, win_title: str = "") -> Optional[dict]:
     """Matches a foreground Windows executable against the 260 harvested 3Dconnexion app profiles."""
     if not exe_name and not win_title:
         return None
     exe_l = (exe_name or "").lower().strip()
+    exe_l = EXE_PROFILE_ALIASES.get(exe_l, exe_l)
     exe_norm = exe_l.replace("_", "-")
     base_no_ext = exe_norm[:-4] if exe_norm.endswith(".exe") else exe_norm
     best_match = None
