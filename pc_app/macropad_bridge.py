@@ -2210,8 +2210,8 @@ UNIVERSAL_APP_CELLS = [
     {"index": 4, "label": "CUT",   "icon": "cad_trim",   "hotkey": "CTRL+X"},
     {"index": 5, "label": "UNDO",  "icon": "cad_rotate", "hotkey": "CTRL+Z"},
     {"index": 6, "label": "REDO",  "icon": "next",       "hotkey": "CTRL+Y"},
-    {"index": 7, "label": "FIND",  "icon": "cad_zoom",   "hotkey": "CTRL+F"},
-    {"index": 8, "label": "SAVE",  "icon": "cad_save",   "hotkey": "CTRL+S"},
+    {"index": 7, "label": "FIND",  "icon": "cad_zext",   "hotkey": "CTRL+F"},
+    {"index": 8, "label": "SAVE",  "icon": "cad_qsave",  "hotkey": "CTRL+S"},
     {"index": 9, "label": "ESC",   "icon": "cad_esc",    "hotkey": "ESC"},
 ]
 
@@ -2254,11 +2254,23 @@ def match_tdx_app_profile(exe_name: str, win_title: str = "") -> Optional[dict]:
         return None
     exe_l = (exe_name or "").lower().strip()
     exe_l = EXE_PROFILE_ALIASES.get(exe_l, exe_l)
+    title_l = (win_title or "").lower()
+    # Multi-editor suite disambiguation (e.g. KiCad 9.0 runs Schematic, PCB, and 3D Viewer inside kicad.exe)
+    preferred_id = ""
+    if exe_l in ("kicad.exe", "eeschema.exe", "pcbnew.exe"):
+        if "pcb" in title_l or exe_l == "pcbnew.exe":
+            preferred_id = "kicad_pcb"
+        elif "3d viewer" in title_l:
+            preferred_id = "kicad_3d"
+        elif "schematic" in title_l or exe_l == "eeschema.exe":
+            preferred_id = "kicad_eeschema"
     exe_norm = exe_l.replace("_", "-")
     base_no_ext = exe_norm[:-4] if exe_norm.endswith(".exe") else exe_norm
     best_match = None
     best_score = -1
     for app in tdx_harvested_apps:
+        if preferred_id and app.get("id") == preferred_id:
+            return app
         raw_pat = (app.get("exe_match") or "").lower().strip()
         if not raw_pat:
             continue
@@ -2507,8 +2519,9 @@ def start_window_watcher():
                 else:
                     # 3Dconnexion Auto-Profile OR Universal Fallback
                     last_auto_target_layer = None
-                    if force_app_reeval or not universal_app_overlay_active or (exe_name != last_universal_exe):
-                        last_universal_exe = exe_name
+                    prof_sig = f"{exe_name}:{tdx_match.get('id') if tdx_match else ''}"
+                    if force_app_reeval or not universal_app_overlay_active or (prof_sig != last_universal_exe):
+                        last_universal_exe = prof_sig
                         force_app_reeval = False
                         publish_universal_app_grid(exe_name, win_title)
             else:

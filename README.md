@@ -2,7 +2,7 @@
 
 A custom, battery-powered 16-key mechanical macropad featuring an ultra-low-power **1.54" E-Ink display**, **18 addressable RGB NeoPixels**, **3 rotary encoders**, and seamless **MQTT integration** with Windows, Autodesk Fusion 360, Discord, Home Assistant, and **260+ pre-configured 3D/CAD/Creative applications** via the harvested 3Dconnexion library.
 
-> 📖 **See [`INTEGRATIONS.md`](INTEGRATIONS.md)** for the complete catalog of **260 application profiles**, **2,664 actions/macros**, **402 on-screen radial pie menus**, and **879 24×24 E-Ink icons**.
+> 📖 **See [`INTEGRATIONS.md`](INTEGRATIONS.md)** for the complete catalog of **260 application profiles**, **2,810 actions/macros**, **427 on-screen radial pie menus**, and **3,560 24×24 E-Ink icons**.
 
 ---
 

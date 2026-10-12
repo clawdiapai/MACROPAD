@@ -9,10 +9,10 @@ This document provides the complete reference of all **native API bridges**, **m
 | Metric | Count | Description |
 | :--- | :---: | :--- |
 | **Total Application Profiles** | **260** | Pre-configured application definitions harvested from 3Dconnexion `3DxWinCore/Cfg/*.xml` + native MacroPad rules |
-| **Action-Rich App Profiles** | **187** | Profiles containing decoded keyboard macros, multi-step sequences, or native CAD commands |
-| **Executable Actions & Macros** | **2,664** | Ready-to-use `hotkey:...`, `keyseq:...`, and `cad_cmd:...` actions available in the Unified Studio |
-| **On-Screen Radial Pie Menus** | **402** | 4-slice and 8-slice long-press radial pie menus (`radial_menu.py`) |
-| **24×24 1-Bit E-Ink Icons** | **879** | Dithered monochrome hardware icons compiled into `icon_library.py` |
+| **Action-Rich App Profiles** | **188** | Profiles containing decoded keyboard macros, multi-step sequences, or native CAD commands |
+| **Executable Actions & Macros** | **2,810** | Ready-to-use `hotkey:...`, `keyseq:...`, and `cad_cmd:...` actions available in the Unified Studio |
+| **On-Screen Radial Pie Menus** | **427** | 4-slice and 8-slice long-press radial pie menus (`radial_menu.py`) |
+| **24×24 1-Bit E-Ink Icons** | **3560** | Dithered monochrome hardware icons compiled into `icon_library.py` |
 | **Dedicated Static Hardware Layers** | **16** | 4 Banks × 4 Slots (`Layer 1` – `Layer 16`) stored in `layers_store.json` |
 
 ---
@@ -85,13 +85,13 @@ Every profile below is pre-compiled in [`pi_app/tdx_harvested.json`](pi_app/tdx_
 | 1 | **3D Sprint** | `3dsprint.exe` | 8 | 1 | `TOP` · `FRONT` · `BACK` · `BOTTOM` · `LEFT` · `RIGHT` |
 | 2 | **3DCoat** | `3dcoatgl64.exe` | 7 | 0 | `WHEEL 20` · `WHEEL 20` · `MOVE` · `UNDO` · `REDO` · `SAVE` |
 | 3 | **3Dconnexion Viewer** | `sui_viewer.exe` | 4 | 0 | `FIT` · `OPEN` · `QUICKZOOM` · `QUICKZOOM` · `UNDO` · `REDO` |
-| 4 | **3DEXPERIENCE** | `3dexperience.exe` | 7 | 0 | `PROPS` · `UNDO` · `REDO` · `ARC` · `EXTRUDE` · `REVOLVE` |
+| 4 | **3DEXPERIENCE** | `3dexperience.exe` | 9 | 0 | `PROPS` · `UNDO` · `REDO` · `LINE` · `ARC` · `EXTRUDE` |
 | 5 | **3DEXPERIENCE** | `3dexperience.exe` | 3 | 0 | `UNDO` · `REDO` · `WIREFRAME` · `SAVE` · `COPY` · `PASTE` |
 | 6 | **3DF Zephyr** | `3df zephyr.exe` | 3 | 0 | `SAVE` · `UNDO` · `REDO` · `COPY` · `PASTE` · `DELETE` |
 | 7 | **3ds Max** | `3dsmax.exe` | 8 | 4 | `WIREFRAME` · `SHADED` · `CHAMFER` · `MIRROR` · `BOX` · `SPHERE` |
 | 8 | **3DxUnity3D Editor** | `unity.exe` | 14 | 3 | `MOVE` · `ROTATE` · `SCALE` · `ADD COMP` · `SHADED DR` · `WIREFRM D` |
 | 9 | **3Shape ScanIt Dental** | `dentaldesktop.exe` | 1 | 0 | `FIT` · `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` |
-| 10 | **7-Zip** | `7zfm.exe` | 2 | 0 | `ALL` · `DESELECT` · `UNDO` · `REDO` · `SAVE` · `COPY` |
+| 10 | **7-Zip** | `7zfm.exe` | 3 | 0 | `OPTIONS` · `ALL` · `DESELECT` · `UNDO` · `REDO` · `SAVE` |
 | 11 | **ABAQUS/CAE** | `abqcaeg.exe` | 9 | 2 | `FIT` · `MODEL TRE` · `QUERY` · `MOVIE` · `DATUM` · `CREATE PA` |
 | 12 | **ABAQUS/Viewer** | `abqvwrg.exe` | 6 | 0 | `FIT` · `MODEL TRE` · `QUERY` · `DATUM` · `UNDO` · `REDO` |
 | 13 | **Adobe Acrobat** | `acrobat.exe` | 4 | 0 | `FIT` · `FIRST PAG` · `LAST PAGE` · `FIND` · `UNDO` · `REDO` |
@@ -107,7 +107,7 @@ Every profile below is pre-compiled in [`pi_app/tdx_harvested.json`](pi_app/tdx_
 | 23 | **ArcGISEarth** | `arcgisearth.exe` | 18 | 2 | `RESET NOR` · `RESET TIL` · `RESET TIL` · `SETTINGS` · `TABLE OF` · `ADD DATA` |
 | 24 | **Archicad** | `archicad.exe` | 12 | 1 | `FLOOR PLA` · `3D WINDOW` · `KB END` · `KB PAGEDO` · `KB ENTER` · `KB HOME` |
 | 25 | **ARCHLine.XP** | `archlinexp[0-9]+.bin` | 4 | 1 | `REDO` · `UNDO` · `DISTANCE` · `FIT` · `SAVE` · `COPY` |
-| 26 | **ARES Commander** | `aresc.exe` | 22 | 4 | `REDO` · `UNDO` · `MATCH LAY` · `LINE` · `POLYLINE` · `CIRCLE` |
+| 26 | **ARES Commander** | `aresc.exe` | 23 | 4 | `REDO` · `UNDO` · `MATCH LAY` · `LINE` · `POLYLINE` · `CIRCLE` |
 | 27 | **AutoCAD** | `acad.exe` | 53 | 8 | `ARC` · `POLYGON` · `PASTE` · `DIMENSION` · `MEASURE A` · `LENGTHEN` |
 | 28 | **AutoCad LT** | `acadlt.exe` | 13 | 1 | `FIT` · `LINE` · `RECTANGLE` · `CIRCLE` · `ARC` · `POLYLINE` |
 | 29 | **AutoCAD Start Tab** | `acwebbrowser.exe`, `msedgewebview2.exe` | 19 | 0 | `NEW DRAWI` · `DRAWING` · `NEW TAB` · `NEXT TAB` · `SAMPLES` · `APPLICATI` |
@@ -124,10 +124,10 @@ Every profile below is pre-compiled in [`pi_app/tdx_harvested.json`](pi_app/tdx_
 | 40 | **BricsCAD** | `bricscad.exe` | 18 | 4 | `UNDO` · `REDO` · `LINE` · `POLYLINE` · `CIRCLE` · `RECTANGLE` |
 | 41 | **Cadwork 3D** | `3d.exe` | 2 | 0 | `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` · `DELETE` |
 | 42 | **Capture** | `capture [0-9]+.exe` | 19 | 2 | `WIREFRAME` · `PLOT` · `LIVE` · `BY LAYER` · `BY LOCATI` · `BY DRAWIN` |
-| 43 | **CATIA** | `cnext.exe` | 9 | 0 | `PROPS` · `UNDO` · `REDO` · `LINE` · `ARC` · `EXTRUDE` |
+| 43 | **CATIA** | `cnext.exe` | 11 | 0 | `PROPS` · `UNDO` · `REDO` · `LINE` · `ARC` · `EXTRUDE` |
 | 44 | **CETOL MultiCAD** | `cetolmc.exe` | 13 | 0 | `NEW` · `OPEN` · `OPTIONS` · `SAVE` · `COPY` · `CUT` |
 | 45 | **Chaos Vantage** | `vantage.exe` | 4 | 2 | `ROTATE` · `SCALE` · `REDO` · `UNDO` · `SAVE` · `COPY` |
-| 46 | **CharacterCreator** | `charactercreator.exe` | 8 | 3 | `UNDO` · `REDO` · `MOVE` · `ROTATE` · `SCALE` · `WIREFRAME` |
+| 46 | **CharacterCreator** | `charactercreator.exe` | 9 | 3 | `HOME` · `UNDO` · `REDO` · `MOVE` · `ROTATE` · `SCALE` |
 | 47 | **Chief Architect** | `chief architect premier x[0-9]+.exe` | 18 | 3 | `FIT` · `OBJECT` · `PERSP FUL` · `ORTHO FUL` · `STRAIGHT` · `HINGED DO` |
 | 48 | **CHITUBOX Basic** | `chitubox_basic.exe` | 12 | 1 | `MOVE` · `ROTATE` · `OPEN` · `SAVE` · `SCALE` · `UNDO` |
 | 49 | **CHITUBOX Pro** | `chitubox pro.exe` | 19 | 2 | `MOVE` · `SCALE` · `ROTATE` · `ADD SUPPO` · `DELETE SU` · `EDIT SUPP` |
@@ -142,14 +142,14 @@ Every profile below is pre-compiled in [`pi_app/tdx_harvested.json`](pi_app/tdx_
 | 58 | **CMS IntelliCAD** | `cmsicad.exe` | 11 | 4 | `NEW` · `OPEN` · `OPTIONS` · `LINE` · `POLYLINE` · `COPY` |
 | 59 | **Creality Print** | `crealityprint.exe` | 7 | 0 | `FIT` · `TOP` · `BOTTOM` · `FRONT` · `BACK` · `RIGHT` |
 | 60 | **Creo Elements/Direct Modeling** | `soliddesigner.exe`, `solidd~1.exe` | 20 | 3 | `QUICKZOOM` · `QUICKZOOM` · `FULLSCREE` · `FIT TO` · `SHADED/WI` · `WP BORDER` |
-| 61 | **Creo Parametric** | `xtop.exe` | 42 | 15 | `REPAINT` · `SHADE` · `UNHIDE` · `REFIT` · `APPLY CHA` · `HIDE` |
+| 61 | **Creo Parametric** | `xtop.exe` | 51 | 20 | `REPAINT` · `SHADE` · `UNHIDE` · `REFIT` · `APPLY CHA` · `HIDE` |
 | 62 | **CreoView** | `productview.exe` | 15 | 1 | `FIT` · `TOP` · `RIGHT` · `FRONT` · `ZOOM ALL` · `LEFT` |
 | 63 | **CST STUDIO SUITE** | `modeler.exe`, `3dviewer.exe`, `modeler_amd64.exe` *(+7)* | 10 | 0 | `FIT` · `COPY` · `CUT` · `PASTE` · `ALIGNWIND` · `ALIGNWIND` |
 | 64 | **CStudio** | `cstudio.exe` | 9 | 1 | `WHEEL 20` · `WHEEL 20` · `SAVE` · `UNDO` · `REDO` · `MOVE` |
 | 65 | **Cube3D** | `cube3d.exe` | 1 | 0 | `FIT` · `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` |
 | 66 | **Cyclone 3DR** | `3drviewer.exe`, `3dr.exe` | 8 | 1 | `FLY` · `ORBIT PER` · `ORBIT ORT` · `PANORAMA` · `TOP` · `RIGHT` |
 | 67 | **D5 Render** | `d5_launcher.exe` | 12 | 1 | `WHEEL 20` · `WHEEL 20` · `UNDO` · `REDO` · `SAVE` · `WIREFRAME` |
-| 68 | **DELMIA** | `delmia.exe` | 8 | 0 | `PROPS` · `UNDO` · `REDO` · `LINE` · `ARC` · `EXTRUDE` |
+| 68 | **DELMIA** | `delmia.exe` | 10 | 0 | `PROPS` · `UNDO` · `REDO` · `LINE` · `ARC` · `EXTRUDE` |
 | 69 | **Dental Wings Chairside CAD** | `javaw.exe` | 10 | 0 | `FIT` · `COPY` · `CUT` · `PASTE` · `ALIGNWIND` · `ALIGNWIND` |
 | 70 | **Dental Wings Easy Mode** | `javaw.exe` | 9 | 0 | `COPY` · `CUT` · `PASTE` · `ALIGNWIND` · `ALIGNWIND` · `TABAPPLIC` |
 | 71 | **DentalCAD** | `dentalcadapp.exe` | 15 | 2 | `FIT` · `MEASUREME` · `DISTANCE` · `CUT` · `ROLL MODE` · `ROLL MODE` |
@@ -158,7 +158,7 @@ Every profile below is pre-compiled in [`pi_app/tdx_harvested.json`](pi_app/tdx_
 | 74 | **DraftSight** | `draftsight.exe` | 11 | 1 | `FIT` · `QUICKZOOM` · `LINE` · `RECTANGLE` · `DIM LINEA` · `MIRROR` |
 | 75 | **DraftSight** | `draftsight.exe` | 8 | 1 | `LINE` · `POLYLINE` · `CIRCLE` · `ARC` · `MOVE` · `COPY` |
 | 76 | **DWOS Client** | `javaw.exe` | 10 | 0 | `FIT` · `COPY` · `CUT` · `PASTE` · `ALIGNWIND` · `ALIGNWIND` |
-| 77 | **ENOVIA DMU** | `dmu.exe` | 8 | 0 | `PROPS` · `UNDO` · `REDO` · `LINE` · `ARC` · `EXTRUDE` |
+| 77 | **ENOVIA DMU** | `dmu.exe` | 10 | 0 | `PROPS` · `UNDO` · `REDO` · `LINE` · `ARC` · `EXTRUDE` |
 | 78 | **Enscape Archicad** | `archicad.exe`, `enscape.rendererhost.exe` | 1 | 0 | `FIT` · `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` |
 | 79 | **Enscape Revit** | `revit.exe`, `enscape.rendererhost.exe` | 1 | 0 | `FIT` · `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` |
 | 80 | **Enscape Rhino** | `rhino.exe`, `enscape.rendererhost.exe` | 1 | 0 | `FIT` · `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` |
@@ -166,12 +166,12 @@ Every profile below is pre-compiled in [`pi_app/tdx_harvested.json`](pi_app/tdx_
 | 82 | **Enscape Vectorworks** | `vectorworks.*.exe`, `enscape.rendererhost.exe` | 1 | 0 | `FIT` · `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` |
 | 83 | **ExoViewer 3D** | `exoviewer3d.exe` | 1 | 0 | `FIT` · `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` |
 | 84 | **Firefox** | `firefox.exe` | 22 | 4 | `100%` · `HOME KEY` · `REFRESH` · `GO TO BOT` · `IN PRIVAT` · `NEW TAB` |
-| 85 | **FreeCAD** | `freecad.exe` | 29 | 25 | `SAVE` · `UNDO` · `REDO` · `NEW` · `OPEN` · `DIMENSION` |
-| 86 | **Fusion Electronics** | `fusion360.exe`, `fusion.exe` | 7 | 4 | `SAVE` · `UNDO` · `REDO` · `LINE` · `TEXT` · `CIRCLE` |
+| 85 | **FreeCAD** | `freecad.exe` | 31 | 26 | `SAVE` · `UNDO` · `REDO` · `NEW` · `OPEN` · `DIMENSION` |
+| 86 | **Fusion Electronics** | `fusion360.exe`, `fusion.exe` | 10 | 4 | `SAVE` · `UNDO` · `REDO` · `LINE` · `TEXT` · `CIRCLE` |
 | 87 | **GO2cam** | `go2cam.exe`, `go2camdemo.exe`, `lioncam.exe` | 4 | 0 | `OPEN` · `FIT` · `ZOOM IN` · `ZOOM OUT` · `UNDO` · `REDO` |
 | 88 | **Google Earth** | `googleearth.exe` | 23 | 3 | `FULLSCREE` · `RESET TIL` · `RESET TIL` · `RESET NOR` · `PATH` · `GRID` |
 | 89 | **GPlay** | `gplay.exe` | 3 | 0 | `FIT` · `ZOOM IN` · `ZOOM OUT` · `UNDO` · `REDO` · `SAVE` |
-| 90 | **GstarCAD** | `gcad.exe` | 17 | 3 | `WHEEL 20` · `WHEEL 20` · `POLYLINE` · `CIRCLE` · `RECTANGLE` · `COPY` |
+| 90 | **GstarCAD** | `gcad.exe` | 18 | 3 | `WHEEL 20` · `WHEEL 20` · `POLYLINE` · `CIRCLE` · `RECTANGLE` · `HATCH` |
 | 91 | **GUI Sync SDK Demo** | `guisync_sdk.exe` | 6 | 0 | `FIT` · `KB ESC` · `KB ENTER` · `KB DELETE` · `KB TAB` · `KB SPACE` |
 | 92 | **HiCAD** | `hicad.exe` | 6 | 2 | `FILLET` · `CHAMFER` · `UNDO` · `REDO` · `KB ESC` · `FIT` |
 | 93 | **HLibrary** | `hlibrary.exe` | 10 | 1 | `WHEEL 20` · `WHEEL 20` · `MOVE` · `ROTATE` · `SCALE` · `REDO` |
@@ -185,7 +185,7 @@ Every profile below is pre-compiled in [`pi_app/tdx_harvested.json`](pi_app/tdx_
 | 101 | **ideaMaker** | `ideamaker.exe` | 1 | 0 | `HOME VIEW` · `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` |
 | 102 | **IntelliCAD** | `icad.exe` | 11 | 4 | `NEW` · `OPEN` · `OPTIONS` · `LINE` · `POLYLINE` · `COPY` |
 | 103 | **Internet Explorer** | `iexplore.exe` | 20 | 3 | `OPEN` · `NEW TAB` · `FIND ON P` · `DUP TAB` · `NEW` · `CLOSE TAB` |
-| 104 | **Inventor** | `inventor.exe` | 48 | 52 | `LINE` · `SPLINE` · `OFFSET` · `REDO` · `UNDO` · `CUT` |
+| 104 | **Inventor** | `inventor.exe` | 50 | 52 | `LINE` · `SPLINE` · `OFFSET` · `REDO` · `UNDO` · `CUT` |
 | 105 | **Inventor LT** | `inventor.exe` | 6 | 0 | `QUICKZOOM` · `QUICKZOOM` · `OPEN` · `MEASURE` · `FIND` · `FIT` |
 | 106 | **Inventor RO** | `invro.exe` | 6 | 0 | `QUICKZOOM` · `QUICKZOOM` · `OPEN` · `MEASURE` · `FIND` · `FIT` |
 | 107 | **IRONCAD** | `ironcad.exe` | 1 | 0 | `KB ESC` · `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` |
@@ -195,80 +195,81 @@ Every profile below is pre-compiled in [`pi_app/tdx_harvested.json`](pi_app/tdx_
 | 111 | **K-Compare Revision 4.0** | `kcomparerevision.exe` | 3 | 0 | `WHEEL 20` · `WHEEL 20` · `ANGLE` · `UNDO` · `REDO` · `SAVE` |
 | 112 | **K-Display View 4.0** | `kdisplayview.exe` | 8 | 1 | `WHEEL 20` · `WHEEL 20` · `MOVE` · `SHADED` · `WIREFRAME` · `PRINT` |
 | 113 | **KeyCreator** | `kc.exe` | 16 | 0 | `CONSTRUCT` · `WIREFRAME` · `SHADED` · `TREE` · `LAYOUT TO` · `TOP` |
-| 114 | **KiCad** | `kicad.exe`, `eeschema.exe` | 4 | 0 | `KB ESC` · `FIT` · `W` · `J` · `UNDO` · `REDO` |
-| 115 | **KiCad** | `kicad.exe`, `pcbnew.exe` | 3 | 0 | `KB ESC` · `FIT` · `C` · `UNDO` · `REDO` · `SAVE` |
-| 116 | **KiCad** | `kicad.exe`, `pcbnew.exe` | 3 | 0 | `KB ESC` · `FIT` · `ALT+3` · `UNDO` · `REDO` · `SAVE` |
-| 117 | **KOMPAS-3D** | `kompas.exe` | 5 | 0 | `FIT` · `KB F9` · `SAVEAS` · `NEW` · `KB ESC` · `UNDO` |
-| 118 | **LightWave** | `modeler.exe`, `layout.exe` | 9 | 0 | `FIT` · `RIGHT` · `COPY` · `CUT` · `PASTE` · `ALIGNWIND` |
-| 119 | **Lychee Slicer** | `lycheeslicer.exe` | 1 | 0 | `GO HOME/F` · `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` |
-| 120 | **Mastercam X** | `mastercam.exe` | 24 | 2 | `FIT` · `TOP` · `FRONT` · `BACK` · `BOTTOM` · `RIGHT` |
-| 121 | **Mastercam X** | `mastercam.exe` | 19 | 2 | `ZOOM - TA` · `ZOOM -` · `UN-ZOOM 5` · `SHADE TOG` · `REDRAW` · `HIDE ENTI` |
-| 122 | **Maya** | `maya.exe` | 4 | 1 | `EXTRUDE` · `FIT` · `ZOOM IN` · `ZOOM OUT` · `UNDO` · `REDO` |
-| 123 | **Microsoft Edge** | `msedge.exe` | 8 | 0 | `PRINT` · `INPRIVATE` · `OPEN` · `NEWTAB` · `FINDONPAG` · `DUPTAB` |
-| 124 | **Microsoft Edge** | `microsoftedge.exe`, `microsoftedgecp.exe` | 17 | 4 | `ZOOM 100%` · `ADD CURRE` · `A SEARCH` · `FIND ON P` · `HISTORY P` · `FAVORITES` |
-| 125 | **Microsoft Excel** | `excel.exe` | 27 | 2 | `BOLD` · `ITALIC` · `UNDERLINE` · `STRIKETHR` · `FIND` · `REPLACE` |
-| 126 | **Microsoft Paint** | `mspaint.exe` | 19 | 0 | `NEW` · `SELECT` · `PENCIL` · `ERASER` · `TEXT` · `GRID` |
-| 127 | **Microsoft PowerPoint** | `powerpnt.exe` | 17 | 1 | `BOLD` · `ITALIC` · `UNDERLINE` · `STRIKETHR` · `THESAURUS` · `TRANSLATE` |
-| 128 | **Microsoft Teams** | `teams.exe` | 1 | 0 | `MIC MUTE` · `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` |
-| 129 | **Microsoft Word** | `winword.exe` | 21 | 2 | `BOLD` · `ITALIC` · `UNDERLINE` · `STRIKETHR` · `FIND` · `REPLACE` |
-| 130 | **MicroStation** | `ustation.exe` | 12 | 0 | `FIT` · `CTRL ALT` · `CTRL ALT` · `CTRL ALT` · `CTRL ALT` · `CTRL ALT` |
-| 131 | **MicroStation** | `microstation.exe` | 9 | 2 | `TOOLS Q` · `POPUPS` · `MOVE` · `COPY` · `ROTATE` · `SCALE` |
-| 132 | **MicroStation CONNECT** | `microstation.exe` | 25 | 1 | `FIT` · `DIM LINEA` · `DIM ELEME` · `DIM ANGUL` · `PLACE TEX` · `PLACE TAB` |
-| 133 | **MODO** | `modo.exe` | 1 | 0 | `FIT` · `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` |
-| 134 | **Notepad** | `notepad.exe` | 12 | 0 | `FIND NEXT` · `TIME/DATE` · `NEW` · `FIND PREV` · `REPLACE` · `ZOOM IN` |
-| 135 | **NX** | `ugraf.exe` | 34 | 14 | `NEW` · `OPEN` · `SAVE` · `HOLE` · `SPHERE` · `MEASURE` |
-| 136 | **Onshape** | `3dxnlserver.exe` | 21 | 9 | `LINE` · `POINT` · `TEXT` · `TRIM` · `MIRROR` · `EXTEND` |
-| 137 | **OrcaSlicer** | `orca-slicer.exe` | 24 | 2 | `MOVE` · `SCALE` · `ROTATE` · `LAY ON FA` · `SUPPORT P` · `SLICE PLA` |
-| 138 | **Outlook** | `outlook.exe` | 14 | 1 | `BOLD` · `ITALIC` · `UNDERLINE` · `BULLETS` · `FIND` · `REPLACE` |
-| 139 | **PhotoModeler** | `photomodeler.*.exe` | 2 | 0 | `PROPS` · `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` |
-| 140 | **Photoshop** | `photoshop.exe` | 120 | 9 | `CANCEL` · `FIT ON SC` · `STEP BACK` · `STEP FORW` · `PAN` · `CREATE A` |
-| 141 | **Plasticity** | `plasticity.exe` | 19 | 1 | `FRONT` · `RIGHT` · `TOP` · `BOTTOM` · `BACK` · `LEFT` |
-| 142 | **PreForm** | `preform.exe` | 1 | 0 | `HOME VIEW` · `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` |
-| 143 | **Procore** | `3dxnlserver.exe` | 9 | 1 | `MEASURE T` · `SECTION T` · `OBJECT TR` · `PROPS` · `X-RAY` · `FULL SCRE` |
-| 144 | **ProgeCAD** | `pcad.exe` | 23 | 5 | `NEW` · `OPEN` · `LINE` · `RECTANGLE` · `POLYLINE` · `COPY` |
-| 145 | **PrusaSlicer** | `prusa-slicer.exe` | 34 | 2 | `MOVE` · `SCALE` · `ROTATE` · `PLACE ON` · `CUT` · `SEAM PAIN` |
-| 146 | **Quartis** | `quartis.exe` | 11 | 1 | `ZOOM ON C` · `DISPLAY O` · `TOP` · `LEFT` · `RIGHT` · `FRONT` |
-| 147 | **Revizto** | `revizto5.exe` | 9 | 1 | `RULER` · `SECTION` · `NEW ISSUE` · `STAMP` · `OBJECT TR` · `VIEWPOINT` |
-| 148 | **Rhinoceros** | `rhino.exe` | 18 | 0 | `WHEEL 20` · `WHEEL 20` · `ZOOMEXTEN` · `MAXIMIZE` · `SHADE` · `SHADESELE` |
-| 149 | **Rhinoceros** | `rhino.exe`, `revit.exe` | 136 | 5 | `UNDO` · `REDO` · `RENDER` · `TRIM` · `POLYLINE` · `CYLINDER` |
-| 150 | **Rhinoceros 4** | `rhino4.exe` | 22 | 0 | `FIT` · `ZOOM EXTE` · `MAXIMIZE` · `SHADE` · `SHADE SEL` · `UNDO` |
-| 151 | **RhinoNL** | `rhino.exe`, `revit.exe` | 133 | 4 | `POLYLINE` · `CYLINDER` · `TRIM` · `LOFT` · `REVOLVE` · `MOVE` |
-| 152 | **SDK MCAD Demo** | `mcad.exe` | 1 | 0 | `FIT` · `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` |
-| 153 | **Shapr3D** | `spacemousebridge.exe` | 10 | 1 | `ARC` · `LINE` · `RECTANGLE` · `EXTRUDE` · `REVOLVE` · `LOFT` |
-| 154 | **ShellDesigner** | `shelldesigner.exe` | 1 | 0 | `FIT` · `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` |
-| 155 | **Shining3D** | `exscan s.exe`, `exscan hx.exe`, `exscan pro.exe` *(+3)* | 5 | 2 | `UNDO` · `ALL` · `DELETE` · `REDO` · `FIT` · `SAVE` |
-| 156 | **SketchUp for Web** | `3dxnlserver.exe` | 30 | 3 | `SELECT` · `PUSH/PULL` · `OFFSET` · `SEARCH` · `LINE` · `RECTANGLE` |
-| 157 | **SOFTIMAGE/XSI** | `xsi.exe` | 4 | 1 | `FIT` · `REDO` · `UNDO` · `KB ESC` · `SAVE` · `COPY` |
-| 158 | **Solid Edge** | `edge.exe` | 29 | 22 | `SAVE` · `UNDO` · `REDO` · `NEW` · `OPEN` · `OPTIONS` |
-| 159 | **SOLIDWORKS** | `sldworks.exe` | 22 | 15 | `HIDE` · `SHOW` · `UNDO` · `SHADED` · `MIRROR` · `LINE` |
-| 160 | **SOLIDWORKS Visualize** | `sldworksvisualize.exe` | 1 | 0 | `FIT` · `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` |
-| 161 | **Substance 3D Painter** | `adobe substance 3d painter.*.exe` | 54 | 2 | `PROJECT` · `CLOSE PRO` · `SAVE PROJ` · `NEW PROJE` · `SHOW/HIDE` · `INCREASE` |
-| 162 | **Task Manager** | `taskmgr.exe` | 2 | 0 | `OPEN` · `SAVE` · `UNDO` · `REDO` · `COPY` · `PASTE` |
-| 163 | **Teamcenter** | `visview.exe`, `visview_ng.exe` | 20 | 0 | `FIT ALL` · `PART COLO` · `EXPLODED` · `LEFT` · `BOTTOM` · `BACK` |
-| 164 | **Tebis** | `tebis.exe` | 25 | 1 | `FIT` · `FRONT` · `TOP` · `SIDE VIEW` · `SIDE VIEW` · `BOTTOM` |
-| 165 | **Tekla Structures** | `teklastructures.exe` | 10 | 0 | `COPY` · `CUT` · `PASTE` · `ALIGNWIND` · `ALIGNWIND` · `TABAPPLIC` |
-| 166 | **test_action_interface** | `test_action_interface.exe` | 7 | 2 | `NEW` · `OPEN` · `SAVE` · `UNDO` · `REDO` · `COPY` |
-| 167 | **TopSolid** | `topsolid.exe` | 9 | 2 | `CIRCLE` · `RECTANGLE` · `DIMENSION` · `GROUP` · `LINE` · `TEXT` |
-| 168 | **TopSolid Cam NC Operator** | `topsolid.cam.nc.operator.exe` | 10 | 0 | `OPTIONS` · `RET.ARR` · `7` · `ECHAP` · `F1` · `F2` |
-| 169 | **Trimble SketchUp** | `sketchup.exe` | 19 | 8 | `EXPORT 3D` · `WIREFRAME` · `SHADED` · `TEXT` · `UNDO` · `REDO` |
-| 170 | **Twinmotion** | `twinmotion.*.exe` | 2 | 1 | `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` · `DELETE` |
-| 171 | **UltiMaker Cura** | `ultimaker-cura.exe` | 12 | 1 | `MOVE` · `SCALE` · `ROTATE` · `MIRROR` · `SUPPORT B` · `SLICE` |
-| 172 | **Unreal Editor** | `ue4editor.*.exe`, `unrealeditor.*.exe` | 2 | 0 | `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` · `DELETE` |
-| 173 | **Unreal Editor (Asset & Play-in-Editor)** | `ue4editor.*.exe`, `unrealeditor.*.exe` | 1 | 0 | `SNIPPINGT` · `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` |
-| 174 | **Vectorworks** | `vectorworks201[5-9].exe|vectorworks202[0-6].exe` | 12 | 0 | `MODIFY` · `CUT` · `MERGE` · `MIRROR` · `ROTATE` · `FILLET` |
-| 175 | **Vectorworks** | `vectorworks202[6-9].exe` | 3 | 0 | `FIT` · `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` |
-| 176 | **Viewer Demo** | `s3dm_viewer.exe` | 1 | 0 | `FIT` · `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` |
-| 177 | **Windows Explorer** | `explorer.exe` | 25 | 1 | `NEW FILE` · `RENAME` · `FULL SCRE` · `PROPS` · `BACK` · `FORWARD` |
-| 178 | **WindowsMediaCenter** | `ehshell.exe` | 1 | 0 | `FIT` · `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` |
-| 179 | **Windowsshellexperience** | `shellui.exe` | 9 | 1 | `PASTE` · `COPY` · `CUT` · `ALIGNWIND` · `ALIGNWIND` · `TABAPPLIC` |
-| 180 | **WYSIWYG** | `wyg.exe` | 1 | 0 | `FIT` · `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` |
-| 181 | **XVL Studio** | `xvlstudio2.exe` | 4 | 0 | `FIT` · `UNDO` · `REDO` · `KB ESC` · `SAVE` · `COPY` |
-| 182 | **ZBrush** | `zbrush.exe` | 5 | 2 | `REDO` · `SYMMETRY` · `FIT TO ME` · `UNDO` · `REDO` · `SAVE` |
-| 183 | **ZBrushCore** | `zbrushcore.exe` | 7 | 2 | `WHEEL 20` · `WHEEL 20` · `REDO` · `UNDO` · `REDO` · `FIT` |
-| 184 | **ZBrushCoreMini** | `zbrushcoremini.exe` | 5 | 1 | `FIT` · `REDO` · `UNDO` · `OPEN` · `ZINTENSIT` · `SAVE` |
-| 185 | **ZW3D** | `zw3d.exe` | 3 | 1 | `FIT` · `REDO` · `UNDO` · `SAVE` · `COPY` · `PASTE` |
-| 186 | **ZW3D_NavLib** | `zw3d.exe` | 38 | 25 | `WHEEL 20` · `WHEEL 20` · `EXTRUDE` · `REVOLVE` · `SWEEP` · `LOFT` |
-| 187 | **ZWCAD** | `zwcad.exe` | 15 | 4 | `RECTANGLE` · `HATCH` · `COPY` · `TRIM` · `ROTATE` · `MIRROR` |
+| 114 | **KiCad** | `kicad.exe` | 51 | 5 | `FOOTPRINT` · `ADD SYMBO` · `ROTATE CW` · `EDIT VALU` · `PCB EDITO` · `ADD WIRE` |
+| 115 | **KiCad 3D** | `kicad.exe`, `pcbnew.exe` | 12 | 2 | `ORTHO` · `MEASURE` · `REFRESH` · `ROTATE X` · `ROTATE Y` · `ROTATE Z` |
+| 116 | **KiCad PCB** | `kicad.exe`, `pcbnew.exe` | 20 | 3 | `SCHEMATIC` · `ROUTE TRA` · `3D VIEWER` · `SEARCH` · `DIFF PAIR` · `DRAW LINE` |
+| 117 | **KiCad Schematic** | `kicad.exe`, `eeschema.exe` | 27 | 5 | `FOOTPRINT` · `ADD SYMBO` · `ROTATE CW` · `EDIT VALU` · `PCB EDITO` · `ADD WIRE` |
+| 118 | **KOMPAS-3D** | `kompas.exe` | 5 | 0 | `FIT` · `KB F9` · `SAVEAS` · `NEW` · `KB ESC` · `UNDO` |
+| 119 | **LightWave** | `modeler.exe`, `layout.exe` | 9 | 0 | `FIT` · `RIGHT` · `COPY` · `CUT` · `PASTE` · `ALIGNWIND` |
+| 120 | **Lychee Slicer** | `lycheeslicer.exe` | 1 | 0 | `GO HOME/F` · `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` |
+| 121 | **Mastercam X** | `mastercam.exe` | 24 | 2 | `FIT` · `TOP` · `FRONT` · `BACK` · `BOTTOM` · `RIGHT` |
+| 122 | **Mastercam X** | `mastercam.exe` | 19 | 2 | `ZOOM - TA` · `ZOOM -` · `UN-ZOOM 5` · `SHADE TOG` · `REDRAW` · `HIDE ENTI` |
+| 123 | **Maya** | `maya.exe` | 4 | 1 | `EXTRUDE` · `FIT` · `ZOOM IN` · `ZOOM OUT` · `UNDO` · `REDO` |
+| 124 | **Microsoft Edge** | `msedge.exe` | 21 | 3 | `REFRESH` · `ADD TO FA` · `FAVORITES` · `NEW TAB` · `NEW` · `NEW INPRI` |
+| 125 | **Microsoft Edge** | `microsoftedge.exe`, `microsoftedgecp.exe` | 17 | 4 | `ZOOM 100%` · `ADD CURRE` · `A SEARCH` · `FIND ON P` · `HISTORY P` · `FAVORITES` |
+| 126 | **Microsoft Excel** | `excel.exe` | 27 | 2 | `BOLD` · `ITALIC` · `UNDERLINE` · `STRIKETHR` · `FIND` · `REPLACE` |
+| 127 | **Microsoft Paint** | `mspaint.exe` | 19 | 0 | `NEW` · `SELECT` · `PENCIL` · `ERASER` · `TEXT` · `GRID` |
+| 128 | **Microsoft PowerPoint** | `powerpnt.exe` | 17 | 1 | `BOLD` · `ITALIC` · `UNDERLINE` · `STRIKETHR` · `THESAURUS` · `TRANSLATE` |
+| 129 | **Microsoft Teams** | `teams.exe` | 1 | 0 | `MIC MUTE` · `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` |
+| 130 | **Microsoft Word** | `winword.exe` | 21 | 2 | `BOLD` · `ITALIC` · `UNDERLINE` · `STRIKETHR` · `FIND` · `REPLACE` |
+| 131 | **MicroStation** | `ustation.exe` | 12 | 0 | `FIT` · `CTRL ALT` · `CTRL ALT` · `CTRL ALT` · `CTRL ALT` · `CTRL ALT` |
+| 132 | **MicroStation** | `microstation.exe` | 9 | 2 | `TOOLS Q` · `POPUPS` · `MOVE` · `COPY` · `ROTATE` · `SCALE` |
+| 133 | **MicroStation CONNECT** | `microstation.exe` | 25 | 1 | `FIT` · `DIM LINEA` · `DIM ELEME` · `DIM ANGUL` · `PLACE TEX` · `PLACE TAB` |
+| 134 | **MODO** | `modo.exe` | 1 | 0 | `FIT` · `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` |
+| 135 | **Notepad** | `notepad.exe` | 12 | 0 | `FIND NEXT` · `TIME/DATE` · `NEW` · `FIND PREV` · `REPLACE` · `ZOOM IN` |
+| 136 | **NX** | `ugraf.exe` | 35 | 15 | `NEW` · `OPEN` · `SAVE` · `HOLE` · `SPHERE` · `MEASURE` |
+| 137 | **Onshape** | `3dxnlserver.exe` | 21 | 9 | `LINE` · `POINT` · `TEXT` · `TRIM` · `MIRROR` · `EXTEND` |
+| 138 | **OrcaSlicer** | `orca-slicer.exe` | 24 | 2 | `MOVE` · `SCALE` · `ROTATE` · `LAY ON FA` · `SUPPORT P` · `SLICE PLA` |
+| 139 | **Outlook** | `outlook.exe` | 14 | 1 | `BOLD` · `ITALIC` · `UNDERLINE` · `BULLETS` · `FIND` · `REPLACE` |
+| 140 | **PhotoModeler** | `photomodeler.*.exe` | 2 | 0 | `PROPS` · `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` |
+| 141 | **Photoshop** | `photoshop.exe` | 120 | 9 | `CANCEL` · `FIT ON SC` · `STEP BACK` · `STEP FORW` · `PAN` · `CREATE A` |
+| 142 | **Plasticity** | `plasticity.exe` | 19 | 1 | `FRONT` · `RIGHT` · `TOP` · `BOTTOM` · `BACK` · `LEFT` |
+| 143 | **PreForm** | `preform.exe` | 1 | 0 | `HOME VIEW` · `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` |
+| 144 | **Procore** | `3dxnlserver.exe` | 9 | 1 | `MEASURE T` · `SECTION T` · `OBJECT TR` · `PROPS` · `X-RAY` · `FULL SCRE` |
+| 145 | **ProgeCAD** | `pcad.exe` | 24 | 5 | `NEW` · `OPEN` · `HELP` · `LINE` · `RECTANGLE` · `POLYLINE` |
+| 146 | **PrusaSlicer** | `prusa-slicer.exe` | 34 | 2 | `MOVE` · `SCALE` · `ROTATE` · `PLACE ON` · `CUT` · `SEAM PAIN` |
+| 147 | **Quartis** | `quartis.exe` | 11 | 1 | `ZOOM ON C` · `DISPLAY O` · `TOP` · `LEFT` · `RIGHT` · `FRONT` |
+| 148 | **Revizto** | `revizto5.exe` | 9 | 1 | `RULER` · `SECTION` · `NEW ISSUE` · `STAMP` · `OBJECT TR` · `VIEWPOINT` |
+| 149 | **Rhinoceros** | `rhino.exe` | 18 | 0 | `WHEEL 20` · `WHEEL 20` · `ZOOMEXTEN` · `MAXIMIZE` · `SHADE` · `SHADESELE` |
+| 150 | **Rhinoceros** | `rhino.exe`, `revit.exe` | 136 | 5 | `UNDO` · `REDO` · `RENDER` · `TRIM` · `POLYLINE` · `CYLINDER` |
+| 151 | **Rhinoceros 4** | `rhino4.exe` | 22 | 0 | `FIT` · `ZOOM EXTE` · `MAXIMIZE` · `SHADE` · `SHADE SEL` · `UNDO` |
+| 152 | **RhinoNL** | `rhino.exe`, `revit.exe` | 133 | 4 | `POLYLINE` · `CYLINDER` · `TRIM` · `LOFT` · `REVOLVE` · `MOVE` |
+| 153 | **SDK MCAD Demo** | `mcad.exe` | 1 | 0 | `FIT` · `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` |
+| 154 | **Shapr3D** | `spacemousebridge.exe` | 10 | 1 | `ARC` · `LINE` · `RECTANGLE` · `EXTRUDE` · `REVOLVE` · `LOFT` |
+| 155 | **ShellDesigner** | `shelldesigner.exe` | 1 | 0 | `FIT` · `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` |
+| 156 | **Shining3D** | `exscan s.exe`, `exscan hx.exe`, `exscan pro.exe` *(+3)* | 5 | 2 | `UNDO` · `ALL` · `DELETE` · `REDO` · `FIT` · `SAVE` |
+| 157 | **SketchUp for Web** | `3dxnlserver.exe` | 30 | 3 | `SELECT` · `PUSH/PULL` · `OFFSET` · `SEARCH` · `LINE` · `RECTANGLE` |
+| 158 | **SOFTIMAGE/XSI** | `xsi.exe` | 4 | 1 | `FIT` · `REDO` · `UNDO` · `KB ESC` · `SAVE` · `COPY` |
+| 159 | **Solid Edge** | `edge.exe` | 29 | 22 | `SAVE` · `UNDO` · `REDO` · `NEW` · `OPEN` · `OPTIONS` |
+| 160 | **SOLIDWORKS** | `sldworks.exe` | 22 | 15 | `HIDE` · `SHOW` · `UNDO` · `SHADED` · `MIRROR` · `LINE` |
+| 161 | **SOLIDWORKS Visualize** | `sldworksvisualize.exe` | 1 | 0 | `FIT` · `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` |
+| 162 | **Substance 3D Painter** | `adobe substance 3d painter.*.exe` | 54 | 2 | `PROJECT` · `CLOSE PRO` · `SAVE PROJ` · `NEW PROJE` · `SHOW/HIDE` · `INCREASE` |
+| 163 | **Task Manager** | `taskmgr.exe` | 4 | 0 | `OPEN` · `NEW` · `SAVE` · `FIND` · `UNDO` · `REDO` |
+| 164 | **Teamcenter** | `visview.exe`, `visview_ng.exe` | 20 | 0 | `FIT ALL` · `PART COLO` · `EXPLODED` · `LEFT` · `BOTTOM` · `BACK` |
+| 165 | **Tebis** | `tebis.exe` | 25 | 1 | `FIT` · `FRONT` · `TOP` · `SIDE VIEW` · `SIDE VIEW` · `BOTTOM` |
+| 166 | **Tekla Structures** | `teklastructures.exe` | 10 | 0 | `COPY` · `CUT` · `PASTE` · `ALIGNWIND` · `ALIGNWIND` · `TABAPPLIC` |
+| 167 | **test_action_interface** | `test_action_interface.exe` | 7 | 2 | `NEW` · `OPEN` · `SAVE` · `UNDO` · `REDO` · `COPY` |
+| 168 | **TopSolid** | `topsolid.exe` | 9 | 2 | `CIRCLE` · `RECTANGLE` · `DIMENSION` · `GROUP` · `LINE` · `TEXT` |
+| 169 | **TopSolid Cam NC Operator** | `topsolid.cam.nc.operator.exe` | 10 | 0 | `OPTIONS` · `RET.ARR` · `7` · `ECHAP` · `F1` · `F2` |
+| 170 | **Trimble SketchUp** | `sketchup.exe` | 19 | 8 | `EXPORT 3D` · `WIREFRAME` · `SHADED` · `TEXT` · `UNDO` · `REDO` |
+| 171 | **Twinmotion** | `twinmotion.*.exe` | 2 | 1 | `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` · `DELETE` |
+| 172 | **UltiMaker Cura** | `ultimaker-cura.exe` | 12 | 1 | `MOVE` · `SCALE` · `ROTATE` · `MIRROR` · `SUPPORT B` · `SLICE` |
+| 173 | **Unreal Editor** | `ue4editor.*.exe`, `unrealeditor.*.exe` | 2 | 0 | `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` · `DELETE` |
+| 174 | **Unreal Editor (Asset & Play-in-Editor)** | `ue4editor.*.exe`, `unrealeditor.*.exe` | 1 | 0 | `SNIPPINGT` · `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` |
+| 175 | **Vectorworks** | `vectorworks201[5-9].exe|vectorworks202[0-6].exe` | 12 | 0 | `MODIFY` · `CUT` · `MERGE` · `MIRROR` · `ROTATE` · `FILLET` |
+| 176 | **Vectorworks** | `vectorworks202[6-9].exe` | 3 | 0 | `FIT` · `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` |
+| 177 | **Viewer Demo** | `s3dm_viewer.exe` | 1 | 0 | `FIT` · `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` |
+| 178 | **Windows Explorer** | `explorer.exe` | 25 | 1 | `NEW FILE` · `RENAME` · `FULL SCRE` · `PROPS` · `BACK` · `FORWARD` |
+| 179 | **WindowsMediaCenter** | `ehshell.exe` | 1 | 0 | `FIT` · `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` |
+| 180 | **Windowsshellexperience** | `shellui.exe` | 9 | 1 | `PASTE` · `COPY` · `CUT` · `ALIGNWIND` · `ALIGNWIND` · `TABAPPLIC` |
+| 181 | **WYSIWYG** | `wyg.exe` | 1 | 0 | `FIT` · `UNDO` · `REDO` · `SAVE` · `COPY` · `PASTE` |
+| 182 | **XVL Studio** | `xvlstudio2.exe` | 4 | 0 | `FIT` · `UNDO` · `REDO` · `KB ESC` · `SAVE` · `COPY` |
+| 183 | **ZBrush** | `zbrush.exe` | 5 | 2 | `REDO` · `SYMMETRY` · `FIT TO ME` · `UNDO` · `REDO` · `SAVE` |
+| 184 | **ZBrushCore** | `zbrushcore.exe` | 7 | 2 | `WHEEL 20` · `WHEEL 20` · `REDO` · `UNDO` · `REDO` · `FIT` |
+| 185 | **ZBrushCoreMini** | `zbrushcoremini.exe` | 5 | 1 | `FIT` · `REDO` · `UNDO` · `OPEN` · `ZINTENSIT` · `SAVE` |
+| 186 | **ZW3D** | `zw3d.exe` | 3 | 1 | `FIT` · `REDO` · `UNDO` · `SAVE` · `COPY` · `PASTE` |
+| 187 | **ZW3D_NavLib** | `zw3d.exe` | 38 | 25 | `WHEEL 20` · `WHEEL 20` · `EXTRUDE` · `REVOLVE` · `SWEEP` · `LOFT` |
+| 188 | **ZWCAD** | `zwcad.exe` | 16 | 4 | `EXTENTS` · `RECTANGLE` · `HATCH` · `COPY` · `TRIM` · `ROTATE` |
 
 ---
 
@@ -316,41 +317,40 @@ These 73 profiles from the 3Dconnexion library provide executable detection and 
 | 36 | **iCAD SX** | `icadx4j.exe` | `icad_sx` |
 | 37 | **Jet Demo** | `jet.exe` | `jet` |
 | 38 | **KeyShot** | `keyshot.exe` | `keyshot` |
-| 39 | **KiCad** | `kicad.exe` | `kicad` |
-| 40 | **Magics** | `magics.exe` | `materialise_magics` |
-| 41 | **MEDIT Link** | `medit_link.exe` | `medit_link` |
-| 42 | **MoI** | `moi.exe` | `moi` |
-| 43 | **OneCNC** | `onecnc_x64.exe` | `onecnc` |
-| 44 | **OnyxCeph³** | `onyxceph.exe`, `onyxview.exe`, `onyxreport.exe` | `onyxceph` |
-| 45 | **OrthoAnalyzer** | `orthoanalyzer.exe` | `orthoanalyzer` |
-| 46 | **Palette CAD** | `plan3d.exe` | `palette_cad` |
-| 47 | **ParaView** | `paraview.exe` | `paraview` |
-| 48 | **Photos** | `photos.exe` | `msphotos` |
-| 49 | **PowerToys Settings** | `powertoys.settings.exe` | `mspowertoys` |
-| 50 | **QUICKSURFACE** | `quicksurface.exe` | `quicksurface` |
-| 51 | **Revu** | `revu.exe` | `bluebeam_revu` |
-| 52 | **ROBOGUIDE** | `roboguidecore.exe` | `roboguide` |
-| 53 | **Secret Ear Builder** | `sebuilder.exe` | `sebuilder` |
-| 54 | **Secret Ear Designer** | `sedesigner.exe` | `sedesigner` |
-| 55 | **Secret Ear Viewer** | `seviewer.exe` | `seviewer` |
-| 56 | **SmartCAM Production Turning** | `pturn.exe` | `smartcam_pturn` |
-| 57 | **SolidCAM** | `solidcam.exe` | `solidcam_machinesimulation` |
-| 58 | **SpaceClaim** | `spaceclaim.exe` | `spaceclaim` |
-| 59 | **SpinFire** | `spinfire.viewer.exe` | `spinfire` |
-| 60 | **STRAKON Cube** | `plan-x64.exe` | `strakon_cube` |
-| 61 | **Straumann Nova** | `javaw.exe` | `straumann_nova` |
-| 62 | **TopSolid Pdm Explorer** | `topsolid.pdm.explorer.exe` | `topsolidpdmexplorer` |
-| 63 | **TopSolid Viewer** | `topsolid.viewer.exe` | `topsolidviewer` |
-| 64 | **Trimble Business Center** | `trimblebusinesscenter.exe` | `trimblebusinesscenter` |
-| 65 | **TrueMap** | `truemap[0-9]+.exe` | `truemap` |
-| 66 | **TurboCAD** | `tcw[1-9]+.exe` | `turbocad` |
-| 67 | **Vectorworks Viewer** | `vectorworks[0-9]*viewer.exe` | `vectorworksviewer` |
-| 68 | **Visi** | `visi.exe` | `visi` |
-| 69 | **VISI Qt** | `visiqt.exe` | `visiqt` |
-| 70 | **Windows Photo Viewer** | `dllhost.exe` | `windowsphotoviewer` |
-| 71 | **WinRAR** | `winrar.exe` | `winrar` |
-| 72 | **ZEISS CALYPSO** | `acis35.exe` | `zeiss_calypso` |
-| 73 | **ZEISS INSPECT** | `zeiss_inspect.exe` | `zeiss_inspect` |
+| 39 | **Magics** | `magics.exe` | `materialise_magics` |
+| 40 | **MEDIT Link** | `medit_link.exe` | `medit_link` |
+| 41 | **MoI** | `moi.exe` | `moi` |
+| 42 | **OneCNC** | `onecnc_x64.exe` | `onecnc` |
+| 43 | **OnyxCeph³** | `onyxceph.exe`, `onyxview.exe`, `onyxreport.exe` | `onyxceph` |
+| 44 | **OrthoAnalyzer** | `orthoanalyzer.exe` | `orthoanalyzer` |
+| 45 | **Palette CAD** | `plan3d.exe` | `palette_cad` |
+| 46 | **ParaView** | `paraview.exe` | `paraview` |
+| 47 | **Photos** | `photos.exe` | `msphotos` |
+| 48 | **PowerToys Settings** | `powertoys.settings.exe` | `mspowertoys` |
+| 49 | **QUICKSURFACE** | `quicksurface.exe` | `quicksurface` |
+| 50 | **Revu** | `revu.exe` | `bluebeam_revu` |
+| 51 | **ROBOGUIDE** | `roboguidecore.exe` | `roboguide` |
+| 52 | **Secret Ear Builder** | `sebuilder.exe` | `sebuilder` |
+| 53 | **Secret Ear Designer** | `sedesigner.exe` | `sedesigner` |
+| 54 | **Secret Ear Viewer** | `seviewer.exe` | `seviewer` |
+| 55 | **SmartCAM Production Turning** | `pturn.exe` | `smartcam_pturn` |
+| 56 | **SolidCAM** | `solidcam.exe` | `solidcam_machinesimulation` |
+| 57 | **SpaceClaim** | `spaceclaim.exe` | `spaceclaim` |
+| 58 | **SpinFire** | `spinfire.viewer.exe` | `spinfire` |
+| 59 | **STRAKON Cube** | `plan-x64.exe` | `strakon_cube` |
+| 60 | **Straumann Nova** | `javaw.exe` | `straumann_nova` |
+| 61 | **TopSolid Pdm Explorer** | `topsolid.pdm.explorer.exe` | `topsolidpdmexplorer` |
+| 62 | **TopSolid Viewer** | `topsolid.viewer.exe` | `topsolidviewer` |
+| 63 | **Trimble Business Center** | `trimblebusinesscenter.exe` | `trimblebusinesscenter` |
+| 64 | **TrueMap** | `truemap[0-9]+.exe` | `truemap` |
+| 65 | **TurboCAD** | `tcw[1-9]+.exe` | `turbocad` |
+| 66 | **Vectorworks Viewer** | `vectorworks[0-9]*viewer.exe` | `vectorworksviewer` |
+| 67 | **Visi** | `visi.exe` | `visi` |
+| 68 | **VISI Qt** | `visiqt.exe` | `visiqt` |
+| 69 | **Windows Photo Viewer** | `dllhost.exe` | `windowsphotoviewer` |
+| 70 | **WinRAR** | `winrar.exe` | `winrar` |
+| 71 | **ZEISS CALYPSO** | `acis35.exe` | `zeiss_calypso` |
+| 72 | **ZEISS INSPECT** | `zeiss_inspect.exe` | `zeiss_inspect` |
 
 ---
 

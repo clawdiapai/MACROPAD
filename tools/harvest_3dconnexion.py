@@ -16,11 +16,13 @@ import json
 import base64
 import hashlib
 import xml.etree.ElementTree as ET
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 CFG_DIR = r"C:\Program Files\3Dconnexion\3DxWare\3DxWinCore\Cfg"
 IMAGES_DIR = os.path.join(CFG_DIR, "Images", "3DxService")
 OUT_JSON = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pi_app", "tdx_harvested.json")
+SEGOE_ICONS_FONT_PATH = r"C:\Windows\Fonts\SegoeIcons.ttf"
+SEGOE_MDL2_FONT_PATH = r"C:\Windows\Fonts\segmdl2.ttf"
 
 # USB HID Usage ID (Hex) -> MacroPad Key Name
 HID_KEY_MAP = {
@@ -229,6 +231,156 @@ APPCMD_NAME_TO_ACTION = {
     "zoom extents": "cad_cmd:_ZOOM E",
     "pan": "cad_cmd:_PAN",
     "orbit": "cad_cmd:_3DORBIT",
+    # KiCad Schematic, PCB & 3D Viewer AppCommand names
+    "add wire": "hotkey:W",
+    "add bus": "hotkey:B",
+    "add wire to bus entry": "hotkey:Z",
+    "add junction": "hotkey:J",
+    "add symbol": "hotkey:A",
+    "add power": "hotkey:P",
+    "add pin": "hotkey:P",
+    "add text": "hotkey:T",
+    "add sheet": "hotkey:S",
+    "add lines": "hotkey:I",
+    "add circle": "hotkey:C",
+    "add arc": "hotkey:CTRL+SHIFT+A",
+    "add rectangle": "hotkey:CTRL+SHIFT+R",
+    "rotate clockwise": "hotkey:R",
+    "edit value…": "hotkey:V",
+    "edit value": "hotkey:V",
+    "edit reference designator...": "hotkey:U",
+    "edit symbol fields...": "hotkey:E",
+    "show datasheet": "hotkey:D",
+    "measure tool": "hotkey:CTRL+SHIFT+M",
+    "interactive delete tool": "hotkey:DELETE",
+    "footprinteditor": "hotkey:CTRL+E",
+    "footprint editor": "hotkey:CTRL+E",
+    "switch to pcb editor": "hotkey:F8",
+    "switch to schematic editor": "hotkey:CTRL+E",
+    "update pcb from schematic…": "hotkey:F8",
+    "update pcb from schematic": "hotkey:F8",
+    "route single track": "hotkey:X",
+    "route differential pair": "hotkey:6",
+    "3d viewer": "hotkey:ALT+3",
+    "add vias": "hotkey:V",
+    "add filled zone": "hotkey:B",
+    "add footprint": "hotkey:O",
+    "add pad": "hotkey:CTRL+SHIFT+P",
+    "add rule area": "hotkey:CTRL+SHIFT+K",
+    "add aligned dimension": "hotkey:CTRL+SHIFT+H",
+    "draw line": "hotkey:CTRL+SHIFT+L",
+    "draw circle": "hotkey:CTRL+SHIFT+C",
+    "suchfeld anzeigen": "hotkey:CTRL+F",
+    "toggle orthographic projection": "hotkey:SPACE",
+    "preferences...": "hotkey:CTRL+,",
+    "list hotkeys...": "hotkey:CTRL+F1",
+    "help": "hotkey:F1",
+    # Browser / MSEdge / General AppCommand names
+    "refresh": "hotkey:F5",
+    "add to favorites": "hotkey:CTRL+D",
+    "favorites": "hotkey:CTRL+SHIFT+O",
+    "new tab": "hotkey:CTRL+T",
+    "new window": "hotkey:CTRL+N",
+    "new inprivate window": "hotkey:CTRL+SHIFT+N",
+    "duplicate tab": "hotkey:CTRL+SHIFT+K",
+    "close tab": "hotkey:CTRL+W",
+    "reopen closed tab": "hotkey:CTRL+SHIFT+T",
+    "reset zoom level": "hotkey:CTRL+0",
+    "full screen": "hotkey:F11",
+    "history": "hotkey:CTRL+H",
+    "dowloads": "hotkey:CTRL+J",
+    "downloads": "hotkey:CTRL+J",
+    "zoom in": "hotkey:CTRL+=",
+    "zoom out": "hotkey:CTRL+-",
+    "extents": "hotkey:F",
+    "home": "hotkey:HOME",
+}
+
+APPCMD_ID_TO_ACTION = {
+    "AppCommand_eeschema.InteractiveDrawingLineWireBus.drawWires": ("Add Wire", "hotkey:W"),
+    "AppCommand_eeschema.InteractiveDrawing.placeSymbol": ("Add Symbol", "hotkey:A"),
+    "AppCommand_eeschema.InteractiveDrawing.placePowerSymbol": ("Add Power", "hotkey:P"),
+    "AppCommand_eeschema.InteractiveDrawing.placeJunction": ("Add Junction", "hotkey:J"),
+    "AppCommand_eeschema.InteractiveDrawingLineWireBus.drawBuses": ("Add Bus", "hotkey:B"),
+    "AppCommand_eeschema.InteractiveDrawing.placeBusWireEntry": ("Bus Entry", "hotkey:Z"),
+    "AppCommand_eeschema.InteractiveEdit.rotateCW": ("Rotate CW", "hotkey:R"),
+    "AppCommand_eeschema.InteractiveEdit.editValue": ("Edit Value", "hotkey:V"),
+    "AppCommand_eeschema.InteractiveEdit.editReference": ("Edit Ref", "hotkey:U"),
+    "AppCommand_eeschema.InspectionTool.showDatasheet": ("Datasheet", "hotkey:D"),
+    "AppCommand_common.InteractiveEdit.measureTool": ("Measure", "hotkey:CTRL+SHIFT+M"),
+    "AppCommand_eeschema.InteractiveDrawing.placeSchematicText": ("Add Text", "hotkey:T"),
+    "AppCommand_common.Control.updatePcbFromSchematic": ("Update PCB", "hotkey:F8"),
+    "AppCommand_common.Control.showFootprintEditor": ("Footprints", "hotkey:CTRL+E"),
+    "AppCommand_eeschema.EditorControl.showPcbNew": ("PCB Editor", "hotkey:F8"),
+    "AppCommand_common.Interactive.deleteTool": ("Delete", "hotkey:DELETE"),
+    "AppCommand_eeschema.InteractiveDrawing.drawSheet": ("Add Sheet", "hotkey:S"),
+    "AppCommand_pcbnew.InteractiveRouter.SingleTrack": ("Route Track", "hotkey:X"),
+    "AppCommand_pcbnew.InteractiveRouter.DiffPair": ("Diff Pair", "hotkey:6"),
+    "AppCommand_common.Control.show3DViewer": ("3D Viewer", "hotkey:ALT+3"),
+    "AppCommand_pcbnew.InteractiveDrawing.via": ("Add Via", "hotkey:V"),
+    "AppCommand_pcbnew.InteractiveDrawing.zone": ("Filled Zone", "hotkey:B"),
+    "AppCommand_pcbnew.EditorControl.placeFootprint": ("Add Footprt", "hotkey:O"),
+    "AppCommand_pcbnew.EditorControl.showEeschema": ("Schematic", "hotkey:CTRL+E"),
+    "AppCommand_pcbnew.InteractiveDrawing.line": ("Draw Line", "hotkey:CTRL+SHIFT+L"),
+    "AppCommand_pcbnew.InteractiveDrawing.circle": ("Draw Circle", "hotkey:CTRL+SHIFT+C"),
+    "AppCommand_pcbnew.InteractiveDrawing.text": ("Add Text", "hotkey:CTRL+SHIFT+T"),
+    "AppCommand_pcbnew.InteractiveDrawing.alignedDimension": ("Dimension", "hotkey:CTRL+SHIFT+H"),
+    "AppCommand_pcbnew.PadTool.placePad": ("Add Pad", "hotkey:CTRL+SHIFT+P"),
+    "AppCommand_common.Interactive.search": ("Search", "hotkey:CTRL+F"),
+    "AppCommand_3DViewer.Control.toggleOrtho": ("Ortho View", "hotkey:SPACE"),
+    "AppCommand_3DViewer.Control.pivotCenter": ("Center Pivot", "hotkey:C"),
+    "AppCommand_3DViewer.Control.rotateXclockwise": ("Rotate X", "hotkey:X"),
+    "AppCommand_3DViewer.Control.rotateYclockwise": ("Rotate Y", "hotkey:Y"),
+    "AppCommand_3DViewer.Control.rotateZclockwise": ("Rotate Z", "hotkey:Z"),
+    "AppCommand_common.SuiteControl.openPreferences": ("Preferences", "hotkey:CTRL+,"),
+    "AppCommand_common.SuiteControl.listHotKeys": ("Hotkeys", "hotkey:CTRL+F1"),
+    "AppCommand_common.SuiteControl.help": ("Help", "hotkey:F1"),
+}
+
+# Semantic Segoe Fluent Icons codepoints pre-rendered into harvested_icons so every fallback icon is 100% present
+SEMANTIC_GLYPHS = {
+    "tdx_glyph_refresh": "\ue72c",
+    "tdx_glyph_home": "\ue80f",
+    "tdx_glyph_zoom_fit": "\ue9a6",
+    "tdx_glyph_zoom_in": "\ue8a3",
+    "tdx_glyph_zoom_out": "\ue71f",
+    "tdx_glyph_new_tab": "\ue710",
+    "tdx_glyph_close_tab": "\ue711",
+    "tdx_glyph_incognito": "\ue727",
+    "tdx_glyph_back": "\ue72b",
+    "tdx_glyph_forward": "\ue72a",
+    "tdx_glyph_up": "\ue74a",
+    "tdx_glyph_down": "\ue74b",
+    "tdx_glyph_history": "\ue81c",
+    "tdx_glyph_download": "\ue896",
+    "tdx_glyph_bookmark": "\ue734",
+    "tdx_glyph_fullscreen": "\ue740",
+    "tdx_glyph_find": "\ue721",
+    "tdx_glyph_undo": "\ue7a7",
+    "tdx_glyph_redo": "\ue7a6",
+    "tdx_glyph_save": "\ue74e",
+    "tdx_glyph_copy": "\ue8c8",
+    "tdx_glyph_paste": "\ue77f",
+    "tdx_glyph_cut": "\ue8c6",
+    "tdx_glyph_delete": "\ue74d",
+    "tdx_glyph_new_file": "\ue8a5",
+    "tdx_glyph_open": "\ue838",
+    "tdx_glyph_print": "\ue749",
+    "tdx_glyph_grid": "\ue80a",
+    "tdx_glyph_fill": "\ue790",
+    "tdx_glyph_pencil": "\ue70f",
+    "tdx_glyph_eraser": "\ue75c",
+    "tdx_glyph_text": "\ue8d2",
+    "tdx_glyph_select": "\uef20",
+    "tdx_glyph_settings": "\ue713",
+    "tdx_glyph_view": "\ue7b3",
+    "tdx_glyph_esc": "\ue711",
+    "tdx_glyph_cmd": "\ue756",
+    "tdx_glyph_ruler": "\uecc6",
+    "tdx_glyph_color": "\uef3c",
+    "tdx_glyph_play": "\ue768",
+    "tdx_glyph_layers": "\ue81e",
+    "tdx_glyph_sparkle": "\ue734",
 }
 
 # Prefix mapping from en-US.xml Macro_<Prefix>_* to XML filename stems
@@ -314,43 +466,98 @@ def pil_to_24x24_hex(im: Image.Image) -> str:
     return ascii_to_hex(lines, 24, 24)
 
 
+_segoe_font_cache = None
+
+def render_glyph_to_24x24_hex(glyphs_str: str) -> str:
+    """Renders a Segoe Fluent Icons / Segoe MDL2 Assets unicode glyph string into a 24x24 1-bit hex bitmap."""
+    global _segoe_font_cache
+    if not glyphs_str:
+        return ""
+    if _segoe_font_cache is None:
+        for fp in (SEGOE_ICONS_FONT_PATH, SEGOE_MDL2_FONT_PATH):
+            if os.path.exists(fp):
+                try:
+                    _segoe_font_cache = ImageFont.truetype(fp, 22)
+                    break
+                except Exception:
+                    pass
+    if _segoe_font_cache is None:
+        return ""
+    im = Image.new("RGBA", (40, 40), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    for ch in glyphs_str:
+        d.text((8, 8), ch, font=_segoe_font_cache, fill=(255, 255, 255, 255))
+    bbox = im.getbbox()
+    if not bbox:
+        return ""
+    im = im.crop(bbox)
+    im.thumbnail((20, 20), Image.Resampling.LANCZOS)
+    canvas = Image.new("RGBA", (24, 24), (0, 0, 0, 0))
+    canvas.paste(im, ((24 - im.width) // 2, (24 - im.height) // 2))
+    px = list(canvas.getdata())
+    lines = ["".join("#" if px[y * 24 + x][3] >= 90 else "." for x in range(24)) for y in range(24)]
+    return ascii_to_hex(lines, 24, 24)
+
+
 def guess_fallback_icon(label: str, action: str) -> str:
-    """Picks the best built-in 24x24 icon name when no PNG icon is embedded."""
+    """Picks a guaranteed 24x24 icon name (either built-in cad_* or pre-rendered tdx_glyph_*)."""
     s = f"{label} {action}".lower()
-    if any(k in s for k in ("top", "plan")): return "cad_box"
-    if any(k in s for k in ("front", "back", "rear", "left", "right", "bottom", "iso", "view", "camera", "persp", "ortho")): return "eye"
-    if any(k in s for k in ("fit", "zoom", "extents", "focus", "frame", "home")): return "cad_zoom_ext"
-    if "undo" in s: return "cad_undo"
-    if "redo" in s: return "cad_redo"
-    if "save" in s or "export" in s: return "cad_qsave"
+    if any(k in s for k in ("refresh", "reload", "f5")): return "tdx_glyph_refresh"
+    if "home" in s: return "tdx_glyph_home"
+    if any(k in s for k in ("inprivate", "incognito", "private")): return "tdx_glyph_incognito"
+    if "new tab" in s or "ctrl+t" in s: return "tdx_glyph_new_tab"
+    if "close tab" in s or "ctrl+w" in s: return "tdx_glyph_close_tab"
+    if "history" in s or "ctrl+h" in s: return "tdx_glyph_history"
+    if "download" in s or "dowload" in s or "ctrl+j" in s: return "tdx_glyph_download"
+    if "bookmark" in s or "favorite" in s or "ctrl+d" in s: return "tdx_glyph_bookmark"
+    if "full screen" in s or "fullscreen" in s or "full scre" in s or "f11" in s: return "tdx_glyph_fullscreen"
+    if "back" in s or "previous" in s or "prev" in s: return "tdx_glyph_back"
+    if "forward" in s or "next" in s: return "tdx_glyph_forward"
+    if "top page" in s or "go to top" in s: return "tdx_glyph_up"
+    if "bottom" in s or "go to bot" in s: return "tdx_glyph_down"
+    if "zoom in" in s or "ctrl+=" in s: return "tdx_glyph_zoom_in"
+    if "zoom out" in s or "ctrl+-" in s: return "tdx_glyph_zoom_out"
+    if any(k in s for k in ("fit", "100%", "extents", "focus", "frame", "reset zoom")): return "tdx_glyph_zoom_fit"
+    if any(k in s for k in ("front", "rear", "left", "right", "iso", "view", "camera", "persp", "ortho", "3d")): return "tdx_glyph_view"
+    if "undo" in s or "ctrl+z" in s: return "tdx_glyph_undo"
+    if "redo" in s or "ctrl+y" in s: return "tdx_glyph_redo"
+    if "save" in s or "export" in s or "ctrl+s" in s: return "tdx_glyph_save"
+    if "new" in s or "ctrl+n" in s: return "tdx_glyph_new_file"
+    if "open" in s or "import" in s or "folder" in s or "ctrl+o" in s: return "tdx_glyph_open"
+    if "print" in s or "plot" in s or "ctrl+p" in s: return "tdx_glyph_print"
+    if "find" in s or "search" in s or "ctrl+f" in s or "f3" in s: return "tdx_glyph_find"
+    if "copy" in s or "clone" in s or "dup" in s or "ctrl+c" in s: return "tdx_glyph_copy"
+    if "paste" in s or "ctrl+v" in s: return "tdx_glyph_paste"
+    if "cut" in s or "ctrl+x" in s: return "tdx_glyph_cut"
+    if "del" in s or "clear" in s: return "tdx_glyph_delete"
+    if "eras" in s: return "tdx_glyph_eraser"
+    if "pencil" in s or "brush" in s or "sculpt" in s or "paint" in s or "draw" in s or "sketch" in s: return "tdx_glyph_pencil"
+    if "select" in s: return "tdx_glyph_select"
+    if "fill" in s: return "tdx_glyph_fill"
+    if "color" in s or "colour" in s or "picker" in s: return "tdx_glyph_color"
+    if "ruler" in s: return "tdx_glyph_ruler"
     if "move" in s or "translate" in s or "pan" in s or "grab" in s: return "cad_move"
     if "rotat" in s or "orbit" in s or "roll" in s or "spin" in s: return "cad_rotate"
     if "scale" in s or "size" in s: return "cad_scale"
     if "mirror" in s or "flip" in s or "symmetr" in s: return "cad_mirror"
     if "offset" in s or "shell" in s: return "cad_offset"
-    if "trim" in s or "cut" in s or "split" in s or "slice" in s: return "cad_trim"
+    if "trim" in s or "split" in s or "slice" in s: return "cad_trim"
     if "fillet" in s or "round" in s or "bevel" in s: return "cad_fillet"
     if "chamfer" in s: return "cad_chamfer"
-    if "extrud" in s or "push" in s or "pull" in s or "pad" in s: return "cad_extrude"
-    if "line" in s or "wire" in s or "edge" in s: return "cad_line"
-    if "rect" in s or "box" in s or "cube" in s or "quad" in s: return "cad_rect"
-    if "circ" in s or "sphere" in s or "cyl" in s or "hole" in s: return "cad_circle"
+    if "line" in s or "wire" in s or "track" in s or "route" in s or "bus" in s: return "cad_line"
+    if "rect" in s or "box" in s or "cube" in s or "quad" in s or "sheet" in s: return "cad_rect"
+    if "circ" in s or "sphere" in s or "cyl" in s or "hole" in s or "via" in s or "pad" in s or "junction" in s: return "cad_circle"
     if "arc" in s or "revolve" in s: return "cad_arc"
-    if "poly" in s or "mesh" in s: return "cad_polygon"
-    if "dim" in s or "measur" in s or "dist" in s or "area" in s or "ruler" in s: return "cad_dim"
-    if "text" in s or "note" in s or "label" in s or "annot" in s: return "cad_text"
-    if "layer" in s or "tree" in s or "outliner" in s: return "cad_layer"
-    if "grid" in s or "snap" in s or "ortho" in s: return "grid"
-    if "render" in s or "shade" in s or "light" in s or "mat" in s or "xray" in s: return "sparkles"
-    if "brush" in s or "sculpt" in s or "paint" in s or "draw" in s or "sketch" in s: return "edit"
-    if "play" in s or "sim" in s or "run" in s or "anim" in s or "keyframe" in s: return "play"
-    if "del" in s or "eras" in s or "clear" in s: return "trash"
-    if "copy" in s or "clone" in s or "dup" in s: return "copy"
-    if "paste" in s: return "clipboard"
-    if "search" in s or "find" in s: return "search"
-    if "open" in s or "import" in s or "folder" in s or "project" in s: return "folder"
-    if "setting" in s or "pref" in s or "opt" in s or "prop" in s or "tool" in s: return "sliders"
-    return "code"
+    if "poly" in s or "mesh" in s or "zone" in s: return "cad_poly"
+    if "dim" in s or "measur" in s or "dist" in s or "area" in s: return "cad_dim"
+    if "text" in s or "note" in s or "label" in s or "annot" in s or "value" in s or "ref" in s: return "tdx_glyph_text"
+    if "layer" in s or "tree" in s or "outliner" in s: return "tdx_glyph_layers"
+    if "grid" in s or "snap" in s: return "tdx_glyph_grid"
+    if "render" in s or "shade" in s or "light" in s or "mat" in s: return "tdx_glyph_sparkle"
+    if "play" in s or "sim" in s or "run" in s or "anim" in s: return "tdx_glyph_play"
+    if "setting" in s or "pref" in s or "opt" in s or "prop" in s or "tool" in s: return "tdx_glyph_settings"
+    if "esc" in s: return "tdx_glyph_esc"
+    return "tdx_glyph_cmd"
 
 
 def decode_macro_entry(macro_elem: ET.Element) -> str:
@@ -555,9 +762,19 @@ def harvest():
             if mid and act:
                 global_macros[mid] = act
 
-    # 3. Convert driver PNG icons in Cfg\Images\3DxService\*.png
+    # 3. Convert driver PNG icons in Cfg\Images\3DxService\*.png & pre-render SEMANTIC_GLYPHS
     driver_icons_hex = {}
     harvested_icons = {}
+    for g_id, g_ch in SEMANTIC_GLYPHS.items():
+        gh = render_glyph_to_24x24_hex(g_ch)
+        if gh and gh != "0" * 144:
+            harvested_icons[g_id] = {
+                "name": g_id,
+                "w": 24,
+                "h": 24,
+                "hex": gh,
+            }
+
     if os.path.isdir(IMAGES_DIR):
         for png_path in glob.glob(os.path.join(IMAGES_DIR, "*.png")):
             fname = os.path.basename(png_path)
@@ -576,37 +793,82 @@ def harvest():
             except Exception:
                 pass
 
-    def extract_ba_icon(ba_elem: ET.Element, fallback_label: str, fallback_act: str) -> str:
+    base_action_icons = {}
+    semantic_icon_by_name = {}
+
+    def extract_image_element(img_el: ET.Element) -> str:
+        if img_el is None:
+            return ""
+        # 1. Base64 PNG Data
+        data_el = img_el.find("Data")
+        if data_el is not None and data_el.text:
+            try:
+                raw_bytes = base64.b64decode(data_el.text.strip())
+                im = Image.open(io.BytesIO(raw_bytes))
+                h_str = pil_to_24x24_hex(im)
+                if h_str and h_str != "0" * 144:
+                    digest = hashlib.md5(h_str.encode("ascii")).hexdigest()[:8]
+                    icon_id = f"tdx_ico_{digest}"
+                    if icon_id not in harvested_icons:
+                        harvested_icons[icon_id] = {
+                            "name": icon_id,
+                            "w": 24,
+                            "h": 24,
+                            "hex": h_str,
+                        }
+                    return icon_id
+            except Exception:
+                pass
+        # 2. Segoe Fluent Icons / MDL2 Glyph
+        if img_el.attrib.get("Type") == "Glyph" or img_el.find("Glyphs") is not None:
+            gl_txt = (img_el.findtext("Glyphs") or "").strip()
+            if gl_txt:
+                h_str = render_glyph_to_24x24_hex(gl_txt)
+                if h_str and h_str != "0" * 144:
+                    digest = hashlib.md5(gl_txt.encode("utf-8")).hexdigest()[:8]
+                    icon_id = f"tdx_glyph_{digest}"
+                    if icon_id not in harvested_icons:
+                        harvested_icons[icon_id] = {
+                            "name": icon_id,
+                            "w": 24,
+                            "h": 24,
+                            "hex": h_str,
+                        }
+                    return icon_id
+        # 3. Driver PNG Source
+        src_el = img_el.find("Source")
+        if src_el is not None and src_el.text:
+            m = re.search(r":([^\]]+\.png)", src_el.text.strip(), re.I)
+            if m:
+                fn = m.group(1).lower()
+                if fn in driver_icons_hex:
+                    return driver_icons_hex[fn]
+        return ""
+
+    # Pre-parse Base.xml for global ButtonAction icons (Macro_Cut, Macro_Copy, Macro_New, V3DK_FIT, etc.)
+    base_xml_path = os.path.join(CFG_DIR, "Base.xml")
+    if os.path.exists(base_xml_path):
+        try:
+            b_root = ET.parse(base_xml_path).getroot()
+            for ba in b_root.findall(".//ButtonAction"):
+                aid = (ba.findtext("ID") or "").strip()
+                ico_id = extract_image_element(ba.find("Image"))
+                if aid and ico_id:
+                    base_action_icons[aid] = ico_id
+        except Exception:
+            pass
+
+    def extract_ba_icon(ba_elem: ET.Element, fallback_label: str, fallback_act: str, aid: str = "") -> str:
         if ba_elem is not None:
-            img_el = ba_elem.find("Image")
-            if img_el is not None:
-                data_el = img_el.find("Data")
-                if data_el is not None and data_el.text:
-                    try:
-                        raw_bytes = base64.b64decode(data_el.text.strip())
-                        im = Image.open(io.BytesIO(raw_bytes))
-                        h_str = pil_to_24x24_hex(im)
-                        if h_str and h_str != "0" * 144:
-                            digest = hashlib.md5(h_str.encode("ascii")).hexdigest()[:8]
-                            icon_id = f"tdx_ico_{digest}"
-                            if icon_id not in harvested_icons:
-                                harvested_icons[icon_id] = {
-                                    "name": icon_id,
-                                    "w": 24,
-                                    "h": 24,
-                                    "hex": h_str,
-                                }
-                            return icon_id
-                    except Exception:
-                        pass
-                src_el = img_el.find("Source")
-                if src_el is not None and src_el.text:
-                    # e.g. [driver_images:V3DK_TOP.png]
-                    m = re.search(r":([^\]]+\.png)", src_el.text.strip(), re.I)
-                    if m:
-                        fn = m.group(1).lower()
-                        if fn in driver_icons_hex:
-                            return driver_icons_hex[fn]
+            ico_id = extract_image_element(ba_elem.find("Image"))
+            if ico_id:
+                if fallback_label:
+                    semantic_icon_by_name.setdefault(fallback_label.strip().lower(), ico_id)
+                return ico_id
+        if aid and aid in base_action_icons:
+            return base_action_icons[aid]
+        if fallback_label and fallback_label.strip().lower() in semantic_icon_by_name:
+            return semantic_icon_by_name[fallback_label.strip().lower()]
         return guess_fallback_icon(fallback_label, fallback_act)
 
     # Index extra global macros from en-US.xml by XML filename
@@ -642,6 +904,12 @@ def harvest():
         if not raw_name and sig is not None:
             raw_name = sig.findtext("Name") or ""
         app_name = resolve_str(raw_name) or os.path.splitext(fname)[0]
+        if fname.lower() == "kicad eeschema.xml":
+            app_name = "KiCad Schematic"
+        elif fname.lower() == "kicad pcb.xml":
+            app_name = "KiCad PCB"
+        elif fname.lower() == "kicad 3d.xml":
+            app_name = "KiCad 3D"
 
         # Skip internal 3DxWare helper binaries
         if fname.lower().startswith("3dx") and "unity" not in fname.lower() and "proe" not in fname.lower() and "inventor" not in fname.lower() and "solidworks" not in fname.lower():
@@ -680,7 +948,6 @@ def harvest():
         def register_action(aid: str, name: str, mp_action: str, icon_name: str, priority: int = 2):
             if not mp_action or not name:
                 return
-            # Skip duplicate (name, mp_action)
             clean_nm = resolve_str(name).strip()
             if not clean_nm or clean_nm.startswith("STR_APP_PASSTO"):
                 return
@@ -695,18 +962,21 @@ def harvest():
                 "name": clean_nm,
                 "label": lbl,
                 "action": mp_action,
-                "icon": icon_name or guess_fallback_icon(clean_nm, mp_action),
+                "icon": icon_name or base_action_icons.get(aid) or guess_fallback_icon(clean_nm, mp_action),
                 "priority": priority,
                 "order": existing["order"] if existing else len(actions_dict),
             }
 
-        # 1. Parse <ButtonActions>
+        # 1. Parse <ButtonActions> (and always harvest embedded icons even if AppCommand isn't mapped yet)
         for ba in root.findall("./ButtonActions/ButtonAction"):
             aid = (ba.findtext("ID") or "").strip()
             raw_nm = (ba.findtext("Name") or aid).strip()
             nm = resolve_str(raw_nm)
             btype = ba.attrib.get("Type", "")
             ba_elems_by_id[aid] = ba
+            pre_ico = extract_image_element(ba.find("Image"))
+            if pre_ico and nm:
+                semantic_icon_by_name.setdefault(nm.strip().lower(), pre_ico)
 
             mp_act = ""
             if aid in local_macros:
@@ -737,8 +1007,9 @@ def harvest():
             elif btype == "Keyboard":
                 mp_act = local_macros.get(aid) or normalize_shortcut_str(aid)
             elif btype == "AppCommand":
-                # AutoCAD CMDACAD:ID_<cmd>
-                if "CMDACAD:ID_" in aid:
+                if aid in APPCMD_ID_TO_ACTION:
+                    nm, mp_act = APPCMD_ID_TO_ACTION[aid]
+                elif "CMDACAD:ID_" in aid:
                     cmd_part = aid.split("CMDACAD:ID_")[-1].strip()
                     if cmd_part.lower() in APPCMD_NAME_TO_ACTION:
                         mp_act = APPCMD_NAME_TO_ACTION[cmd_part.lower()]
@@ -746,8 +1017,12 @@ def harvest():
                         mp_act = APPCMD_NAME_TO_ACTION[nm.lower()]
                     elif re.match(r"^[A-Za-z0-9_]+$", cmd_part) and not cmd_part.startswith("MM_"):
                         mp_act = f"cad_cmd:_{cmd_part.upper()}"
-                elif nm.lower() in APPCMD_NAME_TO_ACTION:
-                    mp_act = APPCMD_NAME_TO_ACTION[nm.lower()]
+                else:
+                    clean_lookup = nm.lower().rstrip(".…").strip()
+                    if nm.lower() in APPCMD_NAME_TO_ACTION:
+                        mp_act = APPCMD_NAME_TO_ACTION[nm.lower()]
+                    elif clean_lookup in APPCMD_NAME_TO_ACTION:
+                        mp_act = APPCMD_NAME_TO_ACTION[clean_lookup]
             elif aid in view_ovr:
                 nm, mp_act = view_ovr[aid]
             elif aid in STANDARD_ACTION_MAP:
@@ -756,7 +1031,7 @@ def harvest():
                     nm = std_nm
 
             if mp_act:
-                ico = extract_ba_icon(ba, nm, mp_act)
+                ico = pre_ico or extract_ba_icon(ba, nm, mp_act, aid=aid)
                 register_action(aid, nm, mp_act, ico, priority=1)
 
         # 2. Any local <MacroEntry> not already in <ButtonActions>
@@ -764,16 +1039,16 @@ def harvest():
             if mid not in actions_dict:
                 mp_act = local_macros[mid]
                 pretty = mid.replace("Macro_", "").replace("_", " ")
-                # Skip raw UUID names if they had no ButtonAction wrapper
                 if re.match(r"^[0-9a-fA-F\-]{30,}$", pretty.strip()):
                     continue
-                ico = extract_ba_icon(m_elem, pretty, mp_act)
+                ico = extract_ba_icon(m_elem, pretty, mp_act, aid=mid)
                 register_action(mid, pretty, mp_act, ico, priority=2)
 
         # 3. Extra global macros from en-US.xml matching this XML file
         for mid, pretty_name, mp_act in extra_xml_macros.get(fname.lower(), []):
             if mid not in actions_dict:
-                register_action(mid, pretty_name, mp_act, guess_fallback_icon(pretty_name, mp_act), priority=2)
+                ico = base_action_icons.get(mid) or guess_fallback_icon(pretty_name, mp_act)
+                register_action(mid, pretty_name, mp_act, ico, priority=2)
 
         # 4. Scan <Devices> and <Menus> for referenced ActionIDs
         referenced_ids = []
@@ -784,14 +1059,17 @@ def harvest():
             if aid and aid not in actions_dict:
                 if aid in view_ovr:
                     nm, mp_act = view_ovr[aid]
-                    register_action(aid, nm, mp_act, guess_fallback_icon(nm, mp_act), priority=2)
+                    ico = base_action_icons.get(aid) or guess_fallback_icon(nm, mp_act)
+                    register_action(aid, nm, mp_act, ico, priority=2)
                 elif aid in local_macros:
                     mp_act = local_macros[aid]
                     pretty = aid.replace("Macro_", "").replace("_", " ")
-                    register_action(aid, pretty, mp_act, guess_fallback_icon(pretty, mp_act), priority=2)
+                    ico = base_action_icons.get(aid) or guess_fallback_icon(pretty, mp_act)
+                    register_action(aid, pretty, mp_act, ico, priority=2)
                 elif aid in STANDARD_ACTION_MAP:
                     nm, mp_act = STANDARD_ACTION_MAP[aid]
-                    register_action(aid, nm, mp_act, guess_fallback_icon(nm, mp_act), priority=3)
+                    ico = base_action_icons.get(aid) or guess_fallback_icon(nm, mp_act)
+                    register_action(aid, nm, mp_act, ico, priority=3)
 
         # 5. Parse <Menus><Menu Type="Radial">
         radial_menus = []
@@ -821,7 +1099,6 @@ def harvest():
         # Deduplicate actions by (label, action) keeping highest priority and XML declaration order
         unique_actions = []
         seen_pairs = set()
-        # Boost priority if referenced in <Devices> or <Menus>
         for aid, aobj in actions_dict.items():
             if aid in referenced_ids and aobj["priority"] > 1:
                 aobj["priority"] = 1
@@ -837,11 +1114,9 @@ def harvest():
                     "icon": aobj["icon"],
                 })
 
-        # Even if an AppCfg had 0 custom actions, if it has an exe signature, provide standard 9-cell universal/view actions
         exe_match_str = "|".join(exes)
         app_id = re.sub(r"[^a-z0-9_]+", "_", os.path.splitext(fname)[0].lower()).strip("_")
 
-        # Merge multiple XML variants for same app (e.g. Rhino.xml + Rhino3D.xml + RhinoFS.xml) if needed, or keep distinct
         apps_by_key[app_id] = {
             "id": app_id,
             "name": app_name,
@@ -853,17 +1128,32 @@ def harvest():
             "radial_menus": radial_menus,
         }
 
-    # Build a recommended 9-cell grid template for every app
+    # Merge KiCad Eeschema + KiCad PCB actions into the base KiCad profile so kicad.exe always has a full icon-rich grid
+    if "kicad" in apps_by_key:
+        combined_acts = []
+        seen_k = set()
+        for src_k in ("kicad_eeschema", "kicad_pcb", "kicad_3d"):
+            if src_k in apps_by_key:
+                for act in apps_by_key[src_k]["actions"]:
+                    if (act["label"], act["action"]) not in seen_k:
+                        seen_k.add((act["label"], act["action"]))
+                        combined_acts.append(act)
+        apps_by_key["kicad"]["actions"] = combined_acts
+        apps_by_key["kicad"]["action_count"] = len(combined_acts)
+        if "kicad_eeschema" in apps_by_key and apps_by_key["kicad_eeschema"]["radial_menus"]:
+            apps_by_key["kicad"]["radial_menus"] = list(apps_by_key["kicad_eeschema"]["radial_menus"])
+
+    # Build a recommended 9-cell grid template for every app (using guaranteed tdx_glyph_* icons)
     FALLBACK_CELLS = [
-        {"label": "UNDO", "name": "Undo", "action": "hotkey:CTRL+Z", "icon": "cad_undo"},
-        {"label": "REDO", "name": "Redo", "action": "hotkey:CTRL+Y", "icon": "cad_redo"},
-        {"label": "SAVE", "name": "Save", "action": "hotkey:CTRL+S", "icon": "cad_qsave"},
-        {"label": "COPY", "name": "Copy", "action": "hotkey:CTRL+C", "icon": "copy"},
-        {"label": "PASTE", "name": "Paste", "action": "hotkey:CTRL+V", "icon": "clipboard"},
-        {"label": "DELETE", "name": "Delete", "action": "hotkey:DELETE", "icon": "trash"},
-        {"label": "FIT VIEW", "name": "Fit View", "action": "hotkey:F", "icon": "cad_zoom_ext"},
-        {"label": "FIND", "name": "Find", "action": "hotkey:CTRL+F", "icon": "search"},
-        {"label": "ESCAPE", "name": "Escape", "action": "cad_key:ESC", "icon": "close"},
+        {"label": "UNDO", "name": "Undo", "action": "hotkey:CTRL+Z", "icon": "tdx_glyph_undo"},
+        {"label": "REDO", "name": "Redo", "action": "hotkey:CTRL+Y", "icon": "tdx_glyph_redo"},
+        {"label": "SAVE", "name": "Save", "action": "hotkey:CTRL+S", "icon": "tdx_glyph_save"},
+        {"label": "COPY", "name": "Copy", "action": "hotkey:CTRL+C", "icon": "tdx_glyph_copy"},
+        {"label": "PASTE", "name": "Paste", "action": "hotkey:CTRL+V", "icon": "tdx_glyph_paste"},
+        {"label": "DELETE", "name": "Delete", "action": "hotkey:DELETE", "icon": "tdx_glyph_delete"},
+        {"label": "FIT VIEW", "name": "Fit View", "action": "hotkey:F", "icon": "tdx_glyph_zoom_fit"},
+        {"label": "FIND", "name": "Find", "action": "hotkey:CTRL+F", "icon": "tdx_glyph_find"},
+        {"label": "ESCAPE", "name": "Escape", "action": "cad_key:ESC", "icon": "tdx_glyph_esc"},
     ]
 
     apps_list = sorted(
