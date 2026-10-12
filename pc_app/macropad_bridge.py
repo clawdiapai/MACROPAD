@@ -192,6 +192,17 @@ VK_MAP = {
     "TAB": 0x09,
     "BACKSPACE": 0x08,
     "DELETE": 0x2E,
+    "INSERT": 0x2D,
+    "HOME": 0x24,
+    "END": 0x23,
+    "PGUP": 0x21,
+    "PAGEUP": 0x21,
+    "PGDN": 0x22,
+    "PAGEDOWN": 0x22,
+    "LEFT": 0x25,
+    "UP": 0x26,
+    "RIGHT": 0x27,
+    "DOWN": 0x28,
     "CTRL": 0x11,
     "CONTROL": 0x11,
     "SHIFT": 0x10,
@@ -199,6 +210,8 @@ VK_MAP = {
     "WIN": 0x5B,
     "[": 0xDB,
     "]": 0xDD,
+    "\\": 0xDC,
+    "`": 0xC0,
     "-": 0xBD,
     "=": 0xBB,
     ",": 0xBC,
@@ -206,9 +219,15 @@ VK_MAP = {
     "/": 0xBF,
     ";": 0xBA,
     "'": 0xDE,
+    "NUMPAD0": 0x60, "NUMPAD1": 0x61, "NUMPAD2": 0x62, "NUMPAD3": 0x63, "NUMPAD4": 0x64,
+    "NUMPAD5": 0x65, "NUMPAD6": 0x66, "NUMPAD7": 0x67, "NUMPAD8": 0x68, "NUMPAD9": 0x69,
+    "NUMPAD*": 0x6A, "NUMPAD+": 0x6B, "NUMPAD-": 0x6D, "NUMPAD.": 0x6E, "NUMPAD/": 0x6F,
     "F1": 0x70, "F2": 0x71, "F3": 0x72, "F4": 0x73,
     "F5": 0x74, "F6": 0x75, "F7": 0x76, "F8": 0x77,
     "F9": 0x78, "F10": 0x79, "F11": 0x7A, "F12": 0x7B,
+    "F13": 0x7C, "F14": 0x7D, "F15": 0x7E, "F16": 0x7F,
+    "F17": 0x80, "F18": 0x81, "F19": 0x82, "F20": 0x83,
+    "F21": 0x84, "F22": 0x85, "F23": 0x86, "F24": 0x87,
 }
 
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
@@ -923,6 +942,12 @@ def execute_action_string(action_str: str, label: str = "") -> bool:
     elif prefix == "hotkey":
         time.sleep(0.02)
         send_hotkey_combo(val)
+        return True
+
+    elif prefix == "keyseq":
+        for step_combo in [s.strip() for s in val.split(",") if s.strip()]:
+            time.sleep(0.025)
+            send_hotkey_combo(step_combo)
         return True
 
     elif prefix in ("discord_mic_mute", "mic_mute_toggle"):

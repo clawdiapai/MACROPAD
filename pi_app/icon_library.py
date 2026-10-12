@@ -1390,7 +1390,9 @@ BUILTIN_ICONS_24X24: Dict[str, list] = {
 }
 
 def get_compiled_icons_library() -> Dict[str, Dict[str, Any]]:
-    """Returns all built-in icons compiled to hex strings with dimensions."""
+    """Returns all built-in icons (plus harvested 3Dconnexion icons) compiled to hex strings with dimensions."""
+    import os
+    import json
     lib = {}
     for name, lines in BUILTIN_ICONS_24X24.items():
         # Center vertically inside 24x24 if fewer than 24 rows are specified
@@ -1406,4 +1408,20 @@ def get_compiled_icons_library() -> Dict[str, Dict[str, Any]]:
             "h": 24,
             "hex": ascii_to_hex(padded, 24, 24)
         }
+    tdx_path = os.path.join(os.path.dirname(__file__), "tdx_harvested.json")
+    if os.path.exists(tdx_path):
+        try:
+            with open(tdx_path, "r", encoding="utf-8") as f:
+                tdx_data = json.load(f)
+            for k, v in (tdx_data.get("icons") or {}).items():
+                if k not in lib and isinstance(v, dict) and v.get("hex"):
+                    lib[k] = {
+                        "name": k,
+                        "w": int(v.get("w", 24)),
+                        "h": int(v.get("h", 24)),
+                        "hex": v["hex"]
+                    }
+        except Exception:
+            pass
     return lib
+

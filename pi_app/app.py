@@ -13,7 +13,7 @@ from typing import List, Dict, Any, Optional
 
 import paho.mqtt.client as mqtt
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, JSONResponse
 from pydantic import BaseModel
 
@@ -1033,6 +1033,130 @@ async def set_device_mode(req: Dict[str, Any]):
     add_log_entry("SYSTEM", "MODE", f"Web Hub set Device Mode -> {mode.upper()}")
     broadcast_state()
     return {"status": "ok", "mode": mode, "auto_app_mode": is_auto}
+
+# ------------------------------------------------------------------------------
+# 3DCONNEXION HARVESTED APP PROFILES API (260+ APPS, 2600+ ACTIONS, 400+ RADIALS)
+# ------------------------------------------------------------------------------
+TDX_CATALOG_PATH = os.path.join(os.path.dirname(__file__), "tdx_harvested.json")
+_tdx_catalog_cache = None
+
+def _get_tdx_catalog() -> Dict[str, Any]:
+    global _tdx_catalog_cache
+    if _tdx_catalog_cache is None:
+        if os.path.exists(TDX_CATALOG_PATH):
+            try:
+                with open(TDX_CATALOG_PATH, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                _tdx_catalog_cache = {
+                    "stats": data.get("stats", {}),
+                    "apps": data.get("apps", []),
+                }
+            except Exception as e:
+                _tdx_catalog_cache = {"stats": {}, "apps": [], "error": str(e)}
+        else:
+            _tdx_catalog_cache = {"stats": {}, "apps": []}
+    return _tdx_catalog_cache
+
+@app.get("/api/tdx/catalog")
+async def get_tdx_catalog():
+    """Returns the harvested 3Dconnexion application library (260+ apps, actions, radial menus)."""
+    return _get_tdx_catalog()
+
+@app.post("/api/tdx/import_layer")
+async def import_tdx_app_layer(req: Dict[str, Any]):
+    """1-click imports a harvested 3Dconnexion app profile into a target MacroPad layer (1..16),
+    including 3x3 grid cells, 24x24 E-Ink icons, hold Radial Pie Menus, and Auto-App Switcher rule."""
+    app_id = (req.get("app_id") or "").strip().lower()
+    target_layer = int(req.get("target_layer") or 15)
+    add_auto_rule = req.get("add_auto_rule", True) is not False
+    include_radials = req.get("include_radials", True) is not False
+    push_to_device = req.get("push_to_device", True) is not False
+
+    cat = _get_tdx_catalog()
+    app_entry = next((a for a in cat.get("apps", []) if a.get("id") == app_id), None)
+    if not app_entry:
+        raise HTTPException(status_code=404, detail=f"3Dconnexion app profile '{app_id}' not found")
+
+    custom_cells = req.get("cells")
+    base_cells = custom_cells if (isinstance(custom_cells, list) and len(custom_cells) == 9) else app_entry.get("recommended_cells", [])
+    radial_menus = app_entry.get("radial_menus", []) if include_radials else []
+
+    built_cells = []
+    for i in range(9):
+        src = base_cells[i] if i < len(base_cells) else {"label": f"ACT {i+1}", "icon": "code", "action": f"macro_{i+1}"}
+        cell_obj = {
+            "index": i + 1,
+            "label": (src.get("label") or f"ACT {i+1}")[:10],
+            "icon": src.get("icon") or "code",
+            "action": src.get("action") or f"macro_{i+1}",
+            "hold_enabled": False,
+            "radial_title": "",
+            "radial_slices": []
+        }
+        # Attach harvested 3Dconnexion Radial Pie Menus onto the first N keys
+        if i < len(radial_menus):
+            rm = radial_menus[i]
+            rm_slices = []
+            for sl in rm.get("slices", [])[:8]:
+                act_s = sl.get("action", "")
+                sub_s = act_s.split(":", 1)[-1] if ":" in act_s else act_s
+                rm_slices.append({
+                    "label": sl.get("name") or sl.get("label") or "Slice",
+                    "sub": sub_s[:14],
+                    "action": act_s
+                })
+            if len(rm_slices) >= 2:
+                cell_obj["hold_enabled"] = True
+                cell_obj["radial_title"] = (rm.get("name") or cell_obj["label"]).upper()[:16]
+                cell_obj["radial_slices"] = rm_slices
+        built_cells.append(cell_obj)
+
+    layer_data = {
+        "id": target_layer,
+        "name": app_entry.get("name", f"Layer {target_layer}")[:26],
+        "bank": ((target_layer - 1) // 4) + 1,
+        "slot": ((target_layer - 1) % 4) + 1,
+        "cells": built_cells
+    }
+    layer_manager.save_layer(target_layer, layer_data)
+
+    # Optionally create or update Auto-App Switcher rule
+    exe_match = (app_entry.get("exe_match") or "").strip()
+    rule_added = False
+    if add_auto_rule and exe_match:
+        rules = list(layer_manager.app_rules)
+        existing_idx = next((idx for idx, r in enumerate(rules) if r.get("id") == f"tdx_{app_id}" or (r.get("exe_match") or "").lower() == exe_match.lower()), None)
+        new_rule = {
+            "id": f"tdx_{app_id}",
+            "name": app_entry.get("name", app_id),
+            "exe_match": exe_match,
+            "match": exe_match,
+            "target_layer": target_layer,
+            "layer": target_layer,
+            "enabled": True
+        }
+        if existing_idx is not None:
+            rules[existing_idx] = new_rule
+        else:
+            rules.append(new_rule)
+        layer_manager.save_app_rules_config({"rules": rules})
+        rule_added = True
+
+    mqtt_client.publish("macropad/config_sync", json.dumps({"action": "reload_config", "layer_id": target_layer}))
+
+    if push_to_device or device_state.get("layer") == target_layer:
+        payload = layer_manager.build_mqtt_payload(target_layer, fast=True)
+        if payload:
+            mqtt_client.publish(TOPIC_DISPLAY, json.dumps(payload))
+
+    add_log_entry("SYSTEM", "3DCONNEXION", f"Imported 3Dconnexion profile '{app_entry.get('name')}' -> Layer {target_layer} ({len(radial_menus)} Radial Menus, Auto-Rule={'YES' if rule_added else 'NO'})")
+    return {
+        "status": "imported",
+        "layer_id": target_layer,
+        "layer": layer_manager.get_layer(target_layer),
+        "rule_added": rule_added,
+        "app_rules_config": layer_manager.get_app_rules_config()
+    }
 
 @app.get("/api/icons")
 async def get_icons_library():

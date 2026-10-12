@@ -965,6 +965,9 @@ STUDIO_HTML_CONTENT = r"""<!DOCTYPE html>
       <strong id="focused-app-text" style="color:var(--accent-cyan); font-family:var(--font-mono);">--</strong>
     </div>
 
+    <button class="btn" onclick="openTdxLibraryModal()" style="background:rgba(0,229,255,0.14); color:var(--accent-cyan); border-color:rgba(0,229,255,0.45); font-weight:700;" title="Browse & Import 260+ Harvested 3Dconnexion Application Profiles, Icons & Radial Menus">
+      📦 3Dconnexion Library (260)
+    </button>
     <a href="/debug/backlight" class="btn" style="color:var(--accent-amber); border-color:rgba(255,184,0,0.4);" title="Open Dedicated Screen Backlight & LED Calibrator">
       💡 Backlight
     </a>
@@ -997,6 +1000,7 @@ STUDIO_HTML_CONTENT = r"""<!DOCTYPE html>
             <input type="checkbox" id="chk-live-preview-sync" checked style="accent-color:var(--accent-cyan);">
             Sync selection to physical E-Ink screen
           </label>
+          <button class="btn" onclick="openTdxLibraryModal()" style="border-color:rgba(0,229,255,0.4); color:var(--accent-cyan);" title="Import a 3Dconnexion App Profile into this Layer">📦 Import 3Dx App</button>
           <button class="btn btn-green" onclick="pushSelectedLayerToPad()">⚡ Push to Device</button>
           <button class="btn btn-primary" onclick="saveCurrentLayer()">💾 Save Layer</button>
         </div>
@@ -1101,10 +1105,42 @@ STUDIO_HTML_CONTENT = r"""<!DOCTYPE html>
 
 </main>
 
+<!-- ================= 3DCONNEXION APP LIBRARY MODAL (260+ APPS) ================= -->
+<div id="tdx-library-modal" style="display:none; position:fixed; inset:0; z-index:9999; background:rgba(8,10,14,0.84); backdrop-filter:blur(6px); align-items:center; justify-content:center; padding:24px;">
+  <div style="width:100%; max-width:1100px; height:84vh; background:var(--bg-panel); border:1px solid var(--border); border-radius:16px; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 24px 64px rgba(0,0,0,0.75);">
+    <!-- Header -->
+    <div style="padding:14px 20px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; background:var(--bg-card);">
+      <div style="display:flex; align-items:center; gap:12px;">
+        <span style="font-size:22px;">📦</span>
+        <div>
+          <div style="font-size:15px; font-weight:800; color:#fff;">3Dconnexion Harvested Application Library</div>
+          <div id="tdx-stats-subtitle" style="font-size:11px; color:var(--text-muted);">260+ Preconfigured Application Integrations • 2,664 Functions • 402 Radial Pie Menus • 879 E-Ink Icons</div>
+        </div>
+      </div>
+      <div style="display:flex; gap:10px; align-items:center;">
+        <input type="text" id="tdx-search-input" class="input-field" placeholder="🔍 Search app or .exe (e.g. Blender, Bambu, Prusa, Plasticity, Rhino, Substance...)" oninput="renderTdxAppList()" style="width:360px; padding:7px 12px;">
+        <button class="btn" onclick="closeTdxLibraryModal()" style="padding:6px 12px;">✕ Close</button>
+      </div>
+    </div>
+
+    <!-- Body: Left App List + Right App Inspector & Layer Importer -->
+    <div style="flex:1; display:grid; grid-template-columns:340px 1fr; overflow:hidden;">
+      <!-- Left App List -->
+      <div id="tdx-app-list" style="border-right:1px solid var(--border); overflow-y:auto; padding:10px; display:flex; flex-direction:column; gap:6px; background:rgba(0,0,0,0.18);"></div>
+
+      <!-- Right App Preview & Importer -->
+      <div id="tdx-app-detail" style="overflow-y:auto; padding:18px; display:flex; flex-direction:column; gap:16px;"></div>
+    </div>
+  </div>
+</div>
+
 <script>
   // ================= STATE & ACTION CATALOG =================
   let layersStore = {};
   let iconsLibrary = {};
+  let tdxCatalogApps = [];
+  let tdxStats = {};
+  let selectedTdxAppId = "blender";
   let appRulesConfig = {
     auto_app_mode: true,
     untracked_behavior: 'stay',
@@ -1295,6 +1331,7 @@ STUDIO_HTML_CONTENT = r"""<!DOCTYPE html>
 
   // ================= INITIALIZATION & WEBSOCKET =================
   async function initStudio() {
+    await loadTdxCatalog();
     await loadAllConfig();
     connectWebSocket();
   }
@@ -1900,9 +1937,18 @@ STUDIO_HTML_CONTENT = r"""<!DOCTYPE html>
     const cell = layersStore[selectedLayerId]?.cells?.[selectedControl.index - 1];
     if (!cell) return;
     cell.action = val;
+    for (const grp of ACTION_CATALOG) {
+      for (const it of grp.items) {
+        if (it.val === val) {
+          if (it.shortLabel) cell.label = it.shortLabel;
+          if (it.icon) cell.icon = it.icon;
+          break;
+        }
+      }
+    }
     const rawInp = document.getElementById('raw-action-input');
     if (rawInp) rawInp.value = val;
-    renderHardwareCanvas();
+    renderAll();
   }
 
   function onRawActionInput(val) {
@@ -2209,6 +2255,267 @@ STUDIO_HTML_CONTENT = r"""<!DOCTYPE html>
       `;
       card.onclick = () => selectLayer(lStr);
       grid.appendChild(card);
+    }
+  }
+
+  // ================= 6. 3DCONNEXION HARVESTED APP LIBRARY & IMPORTER =================
+  async function loadTdxCatalog() {
+    try {
+      const res = await fetch('/api/tdx/catalog');
+      const data = await res.json();
+      tdxCatalogApps = data.apps || [];
+      tdxStats = data.stats || {};
+      const subEl = document.getElementById('tdx-stats-subtitle');
+      if (subEl && tdxStats.total_apps) {
+        subEl.textContent = `${tdxStats.total_apps} Preconfigured Apps (${tdxStats.apps_with_actions || 187} with Custom Shortcuts) • ${tdxStats.total_actions || 2664} Executable Functions • ${tdxStats.total_radial_menus || 402} Radial Pie Menus • ${tdxStats.total_icons || 879} E-Ink Icons`;
+      }
+      // Dynamically merge harvested apps with actions into ACTION_CATALOG for Guided Action Picker
+      for (const app of tdxCatalogApps) {
+        if (!app.actions || app.actions.length === 0) continue;
+        const grpName = `📦 3Dx: ${app.name}`;
+        if (!ACTION_CATALOG.some(g => g.group === grpName)) {
+          ACTION_CATALOG.push({
+            group: grpName,
+            items: app.actions.map(a => ({
+              label: `${a.name} (${a.action.replace(/^hotkey:|^cad_cmd:|^keyseq:/, '')})`,
+              val: a.action,
+              icon: a.icon,
+              shortLabel: a.label
+            }))
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('Could not load 3Dconnexion catalog:', e);
+    }
+  }
+
+  function openTdxLibraryModal() {
+    const modal = document.getElementById('tdx-library-modal');
+    if (!modal) return;
+    modal.style.display = 'flex';
+    // Auto-select focused app if it matches a 3Dconnexion profile
+    const focusedExe = (liveDeviceState.focused_app_exe || '').toLowerCase();
+    if (focusedExe) {
+      const matched = tdxCatalogApps.find(a => (a.exe_match || '').toLowerCase().includes(focusedExe));
+      if (matched) selectedTdxAppId = matched.id;
+    }
+    renderTdxAppList();
+    renderTdxAppDetail();
+  }
+
+  function closeTdxLibraryModal() {
+    const modal = document.getElementById('tdx-library-modal');
+    if (modal) modal.style.display = 'none';
+  }
+
+  function renderTdxAppList() {
+    const listEl = document.getElementById('tdx-app-list');
+    if (!listEl) return;
+    const q = (document.getElementById('tdx-search-input')?.value || '').trim().toLowerCase();
+    const filtered = tdxCatalogApps.filter(a => {
+      if (!q) return true;
+      return (a.name || '').toLowerCase().includes(q) ||
+             (a.exe_match || '').toLowerCase().includes(q) ||
+             (a.id || '').toLowerCase().includes(q);
+    });
+
+    listEl.innerHTML = filtered.map(a => {
+      const isSel = a.id === selectedTdxAppId;
+      const menuCount = (a.radial_menus || []).length;
+      return `
+        <div onclick="selectTdxApp('${escapeHtml(a.id)}')" style="padding:9px 11px; border-radius:8px; cursor:pointer; border:1px solid ${isSel ? 'var(--accent-cyan)' : 'var(--border)'}; background:${isSel ? 'rgba(0,229,255,0.12)' : 'var(--bg-card)'}; display:flex; align-items:center; justify-content:space-between; gap:8px;">
+          <div style="min-width:0;">
+            <div style="font-size:12.5px; font-weight:700; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(a.name)}</div>
+            <div style="font-size:10px; font-family:var(--font-mono); color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(a.exe_match || a.xml_file)}</div>
+          </div>
+          <div style="display:flex; gap:4px; flex-shrink:0;">
+            <span style="font-size:10px; font-weight:700; padding:2px 6px; border-radius:4px; background:${a.action_count > 0 ? 'rgba(0,230,118,0.15)' : 'rgba(255,255,255,0.06)'}; color:${a.action_count > 0 ? 'var(--accent-green)' : 'var(--text-muted)'};">${a.action_count} fn</span>
+            ${menuCount > 0 ? `<span style="font-size:10px; font-weight:700; padding:2px 6px; border-radius:4px; background:rgba(0,229,255,0.15); color:var(--accent-cyan);">🎡 ${menuCount}</span>` : ''}
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function selectTdxApp(appId) {
+    selectedTdxAppId = appId;
+    renderTdxAppList();
+    renderTdxAppDetail();
+  }
+
+  function renderTdxAppDetail() {
+    const detailEl = document.getElementById('tdx-app-detail');
+    if (!detailEl) return;
+    const app = tdxCatalogApps.find(a => a.id === selectedTdxAppId) || tdxCatalogApps[0];
+    if (!app) {
+      detailEl.innerHTML = `<div style="color:var(--text-muted);">No 3Dconnexion profiles loaded.</div>`;
+      return;
+    }
+
+    const layerOptions = Array.from({ length: 16 }, (_, i) => {
+      const lid = i + 1;
+      const bank = Math.floor(i / 4) + 1;
+      const slot = ['A', 'B', 'C', 'D'][i % 4];
+      const lName = (layersStore[String(lid)] || {}).name || `Layer ${lid}`;
+      const sel = String(lid) === String(selectedLayerId) ? 'selected' : '';
+      return `<option value="${lid}" ${sel}>Layer ${lid} (Bank ${bank}·${slot}) — ${escapeHtml(lName)}</option>`;
+    }).join('');
+
+    const recCells = app.recommended_cells || [];
+    const radials = app.radial_menus || [];
+
+    const cellsPreviewHtml = recCells.map((c, idx) => {
+      const hasRm = idx < radials.length;
+      return `
+        <div style="background:#dfe5e1; color:#111513; border-radius:6px; padding:6px 4px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; position:relative; border:1px solid #99a39d;">
+          <span style="position:absolute; top:2px; left:4px; font-size:8px; font-family:var(--font-mono); opacity:0.65;">#${idx+1}</span>
+          ${hasRm ? `<span style="position:absolute; top:2px; right:4px; font-size:8px; background:#006064; color:#fff; padding:0 3px; border-radius:3px;">🎡</span>` : ''}
+          <canvas id="tdx-prev-ico-${idx}" width="24" height="24" style="width:24px; height:24px; image-rendering:pixelated;"></canvas>
+          <div style="font-size:9px; font-weight:800; font-family:var(--font-mono); text-align:center;">${escapeHtml(c.label)}</div>
+          <div style="font-size:8px; color:#37474f; font-family:var(--font-mono); max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(c.action)}</div>
+        </div>
+      `;
+    }).join('');
+
+    const radialsHtml = radials.length > 0 ? radials.map((rm, rIdx) => `
+      <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:8px; padding:8px 10px;">
+        <div style="font-size:11px; font-weight:700; color:var(--accent-cyan); margin-bottom:5px;">🎡 Hold Key #${rIdx+1} Radial: ${escapeHtml(rm.name)} (${rm.slices.length} slices)</div>
+        <div style="display:flex; flex-wrap:wrap; gap:5px;">
+          ${rm.slices.map(s => `<span style="font-size:10px; background:rgba(255,255,255,0.06); padding:2px 7px; border-radius:4px; border:1px solid var(--border);"><strong>${escapeHtml(s.name)}</strong> <code style="color:var(--accent-amber);">${escapeHtml(s.action)}</code></span>`).join('')}
+        </div>
+      </div>
+    `).join('') : `<div style="font-size:11px; color:var(--text-muted);">No custom Radial Pie Menus in this XML profile.</div>`;
+
+    const allActionsHtml = (app.actions || []).map((a, aIdx) => `
+      <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:8px; padding:7px 10px; display:flex; align-items:center; justify-content:space-between; gap:8px;">
+        <div style="display:flex; align-items:center; gap:8px; min-width:0;">
+          <canvas id="tdx-act-ico-${aIdx}" width="24" height="24" style="width:24px; height:24px; image-rendering:pixelated; background:#14171f; border-radius:4px; flex-shrink:0;"></canvas>
+          <div style="min-width:0;">
+            <div style="font-size:11.5px; font-weight:700; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(a.name)} <span style="font-size:9.5px; color:var(--accent-cyan); font-family:var(--font-mono);">[${escapeHtml(a.label)}]</span></div>
+            <div style="font-size:10px; font-family:var(--font-mono); color:var(--accent-amber);">${escapeHtml(a.action)}</div>
+          </div>
+        </div>
+        <button class="btn" style="padding:4px 8px; font-size:10px; flex-shrink:0;" onclick="assignTdxActionToCurrentKey(${aIdx})" title="Assign this function & icon to currently selected Keycap in Studio">
+          ➕ To Key #${selectedControl.type === 'cell' ? selectedControl.index : 1}
+        </button>
+      </div>
+    `).join('');
+
+    detailEl.innerHTML = `
+      <!-- Top Import Card -->
+      <div style="background:var(--bg-card); border:1px solid rgba(0,229,255,0.35); border-radius:12px; padding:14px 16px; display:flex; flex-direction:column; gap:12px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+          <div>
+            <div style="font-size:17px; font-weight:800; color:#fff;">${escapeHtml(app.name)}</div>
+            <div style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono);">
+              Executable Match: <strong style="color:var(--accent-cyan);">${escapeHtml(app.exe_match || 'Manual Layer Only')}</strong> • Source: ${escapeHtml(app.xml_file)}
+            </div>
+          </div>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <select id="tdx-target-layer" class="input-field" style="width:245px; font-weight:700;">${layerOptions}</select>
+            <button class="btn btn-primary" onclick="importSelectedTdxApp()" style="padding:8px 16px; font-weight:800;">
+              🚀 1-Click Import to Layer
+            </button>
+          </div>
+        </div>
+        <div style="display:flex; gap:18px; flex-wrap:wrap; font-size:11.5px; color:var(--text-muted);">
+          <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+            <input type="checkbox" id="tdx-chk-radials" checked style="accent-color:var(--accent-cyan);">
+            Include Hold Radial Pie Menus (${radials.length})
+          </label>
+          <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+            <input type="checkbox" id="tdx-chk-autorule" checked style="accent-color:var(--accent-cyan);">
+            Create Auto-App Switcher Rule (<code>${escapeHtml(app.exe_match || 'N/A')}</code>)
+          </label>
+          <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+            <input type="checkbox" id="tdx-chk-push" checked style="accent-color:var(--accent-cyan);">
+            Push immediately to MacroPad E-Ink Display
+          </label>
+        </div>
+      </div>
+
+      <!-- Middle: 3x3 E-Ink Preview + Radial Menus -->
+      <div style="display:grid; grid-template-columns:230px 1fr; gap:16px; align-items:start;">
+        <div>
+          <div style="font-size:11px; font-weight:700; color:var(--text-muted); margin-bottom:6px; text-transform:uppercase;">3×3 E-Ink Layer Preview</div>
+          <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:5px; background:#14171f; padding:8px; border-radius:10px; border:1px solid var(--border);">
+            ${cellsPreviewHtml}
+          </div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          <div style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase;">Harvested 3Dconnexion Radial Pie Menus (${radials.length})</div>
+          ${radialsHtml}
+        </div>
+      </div>
+
+      <!-- Bottom: All Harvested Functions for this App -->
+      <div>
+        <div style="font-size:11px; font-weight:700; color:var(--text-muted); margin-bottom:8px; text-transform:uppercase;">
+          All Harvested Functions (${(app.actions || []).length}) — Click "➕ To Key" to assign a single function
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(290px, 1fr)); gap:8px;">
+          ${allActionsHtml || '<div style="font-size:11px; color:var(--text-muted);">Uses standard universal shortcuts (Undo, Redo, Save, Copy, Paste, Fit View, Find, Escape).</div>'}
+        </div>
+      </div>
+    `;
+
+    // Render 24x24 1-bit icons on preview canvases
+    recCells.forEach((c, idx) => {
+      const cvs = document.getElementById(`tdx-prev-ico-${idx}`);
+      const icoObj = iconsLibrary[c.icon];
+      if (cvs && icoObj && icoObj.hex) {
+        drawIconHexOnCanvas(cvs, icoObj.hex, '#111513', null);
+      }
+    });
+    (app.actions || []).forEach((a, aIdx) => {
+      const cvs = document.getElementById(`tdx-act-ico-${aIdx}`);
+      const icoObj = iconsLibrary[a.icon];
+      if (cvs && icoObj && icoObj.hex) {
+        drawIconHexOnCanvas(cvs, icoObj.hex, '#00e5ff', null);
+      }
+    });
+  }
+
+  function assignTdxActionToCurrentKey(actIdx) {
+    const app = tdxCatalogApps.find(a => a.id === selectedTdxAppId);
+    if (!app || !app.actions || !app.actions[actIdx]) return;
+    const actObj = app.actions[actIdx];
+    const targetIdx = selectedControl.type === 'cell' ? selectedControl.index : 1;
+    selectedControl = { type: 'cell', index: targetIdx };
+    const cell = layersStore[selectedLayerId]?.cells?.[targetIdx - 1];
+    if (!cell) return;
+    cell.label = actObj.label;
+    cell.action = actObj.action;
+    if (actObj.icon) cell.icon = actObj.icon;
+    closeTdxLibraryModal();
+    renderAll();
+  }
+
+  async function importSelectedTdxApp() {
+    const app = tdxCatalogApps.find(a => a.id === selectedTdxAppId);
+    if (!app) return;
+    const targetLayer = Number(document.getElementById('tdx-target-layer')?.value || selectedLayerId || 15);
+    const includeRadials = !!document.getElementById('tdx-chk-radials')?.checked;
+    const addAutoRule = !!document.getElementById('tdx-chk-autorule')?.checked;
+    const pushToDevice = !!document.getElementById('tdx-chk-push')?.checked;
+
+    const res = await fetch('/api/tdx/import_layer', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        app_id: app.id,
+        target_layer: targetLayer,
+        include_radials: includeRadials,
+        add_auto_rule: addAutoRule,
+        push_to_device: pushToDevice
+      })
+    });
+    const data = await res.json();
+    if (data.status === 'imported') {
+      selectedLayerId = String(targetLayer);
+      await loadAllConfig();
+      closeTdxLibraryModal();
     }
   }
 
