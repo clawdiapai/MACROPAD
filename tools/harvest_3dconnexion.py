@@ -697,6 +697,7 @@ def harvest():
                 "action": mp_action,
                 "icon": icon_name or guess_fallback_icon(clean_nm, mp_action),
                 "priority": priority,
+                "order": existing["order"] if existing else len(actions_dict),
             }
 
         # 1. Parse <ButtonActions>
@@ -817,14 +818,14 @@ def harvest():
                     "slices": slices[:8],
                 })
 
-        # Deduplicate actions by (label, action) keeping highest priority
+        # Deduplicate actions by (label, action) keeping highest priority and XML declaration order
         unique_actions = []
         seen_pairs = set()
         # Boost priority if referenced in <Devices> or <Menus>
         for aid, aobj in actions_dict.items():
             if aid in referenced_ids and aobj["priority"] > 1:
                 aobj["priority"] = 1
-        for aobj in sorted(actions_dict.values(), key=lambda x: (x["priority"], x["name"])):
+        for aobj in sorted(actions_dict.values(), key=lambda x: (x["priority"], x["order"])):
             pair = (aobj["label"], aobj["action"])
             if pair not in seen_pairs:
                 seen_pairs.add(pair)

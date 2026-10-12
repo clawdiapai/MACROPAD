@@ -999,7 +999,26 @@ def get_synced_cell_config(layer: int, index: int) -> Optional[dict]:
     return None
 
 def get_radial_menu_for_cell(layer: int, index: int):
-    """Returns (title, slices_list) for (layer, index) from synced Hub store or fallback RADIAL_MENU_MAP."""
+    """Returns (title, slices_list) for (layer, index) from active 3Dx overlay, synced Hub store, or fallback RADIAL_MENU_MAP."""
+    if universal_app_overlay_active and active_tdx_overlay_app:
+        radials = active_tdx_overlay_app.get("radial_menus") or []
+        if 1 <= index <= len(radials):
+            rm = radials[index - 1]
+            title = (rm.get("name") or f"KEY {index}").upper()
+            formatted_slices = []
+            for s in rm.get("slices", [])[:8]:
+                lbl = s.get("name") or s.get("label") or "Slice"
+                act_s = s.get("action", "")
+                sub = act_s.split(":", 1)[-1] if ":" in act_s else act_s
+                disp = f"{lbl}\n({sub})" if sub and sub not in lbl else lbl
+                formatted_slices.append({
+                    "label": disp,
+                    "type": "action_str",
+                    "val": act_s
+                })
+            if formatted_slices:
+                return title, formatted_slices
+
     cell = get_synced_cell_config(layer, index)
     if cell and cell.get("hold_enabled") and cell.get("radial_slices"):
         title = cell.get("radial_title") or cell.get("label") or f"KEY {index}"
@@ -2193,20 +2212,111 @@ UNIVERSAL_APP_CELLS = [
     {"index": 9, "label": "ESC",   "icon": "cad_esc",    "hotkey": "ESC"},
 ]
 
+# ==============================================================================
+# 3DCONNEXION HARVESTED PROFILE AUTO-MATCHER (260+ APPS ZERO-CONFIG)
+# ==============================================================================
+tdx_harvested_apps: List[dict] = []
+tdx_harvested_icons: dict = {}
+active_tdx_overlay_app: Optional[dict] = None
+
+def _load_local_tdx_harvested():
+    global tdx_harvested_apps, tdx_harvested_icons
+    candidates = [
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pi_app", "tdx_harvested.json"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "tdx_harvested.json"),
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                tdx_harvested_apps = data.get("apps") or []
+                tdx_harvested_icons = data.get("icons") or {}
+                logger.info(f"[3Dconnexion Library] Loaded {len(tdx_harvested_apps)} app profiles & {len(tdx_harvested_icons)} icons from {p}")
+                return
+            except Exception as e:
+                logger.warning(f"[3Dconnexion Library] Failed loading {p}: {e}")
+
+_load_local_tdx_harvested()
+
+def match_tdx_app_profile(exe_name: str, win_title: str = "") -> Optional[dict]:
+    """Matches a foreground Windows executable against the 260 harvested 3Dconnexion app profiles."""
+    if not exe_name and not win_title:
+        return None
+    exe_l = (exe_name or "").lower().strip()
+    exe_norm = exe_l.replace("_", "-")
+    base_no_ext = exe_norm[:-4] if exe_norm.endswith(".exe") else exe_norm
+    best_match = None
+    best_score = -1
+    for app in tdx_harvested_apps:
+        raw_pat = (app.get("exe_match") or "").lower().strip()
+        if not raw_pat:
+            continue
+        for part in [p.strip() for p in raw_pat.replace(",", "|").split("|") if p.strip()]:
+            p_norm = part.replace("_", "-")
+            p_base = p_norm[:-4] if p_norm.endswith(".exe") else p_norm
+            if exe_l == part or exe_norm == p_norm or (len(p_base) >= 4 and p_base in base_no_ext):
+                score = int(app.get("action_count") or 0) + (100 if exe_norm == p_norm else 0)
+                if score > best_score:
+                    best_score = score
+                    best_match = app
+    return best_match
+
 def get_clean_app_name(exe_name: str) -> str:
     exe_l = (exe_name or "").lower().strip()
     if exe_l in FRIENDLY_APP_NAMES:
         return FRIENDLY_APP_NAMES[exe_l]
+    tdx = match_tdx_app_profile(exe_l)
+    if tdx and tdx.get("name"):
+        return tdx["name"].upper()[:10]
     base = exe_l[:-4] if exe_l.endswith(".exe") else exe_l
     clean = "".join(c for c in base if c.isalnum() or c in " -_").upper().strip()
     return clean[:6] if clean else "APP"
 
-def publish_universal_app_grid(exe_name: str):
-    """Pushes a Universal App grid to the MacroPad showing the App Name in Cell 1 + 8 universal actions."""
-    global universal_app_overlay_active, universal_app_name
+def publish_universal_app_grid(exe_name: str, win_title: str = ""):
+    """Pushes either a matched 3Dconnexion 9-cell profile (with icons & radial menus)
+    or a Universal App grid to the MacroPad when an app has no static Layer 1..16 rule."""
+    global universal_app_overlay_active, universal_app_name, active_tdx_overlay_app
+    tdx_app = match_tdx_app_profile(exe_name, win_title)
+    universal_app_overlay_active = True
+
+    if tdx_app and tdx_app.get("recommended_cells"):
+        active_tdx_overlay_app = tdx_app
+        universal_app_name = tdx_app.get("name", get_clean_app_name(exe_name))
+        rec_cells = tdx_app["recommended_cells"]
+        radials = tdx_app.get("radial_menus") or []
+        labels = [""] * 9
+        icons = [""] * 9
+        hold_mask = 0
+        for i in range(9):
+            c = rec_cells[i] if i < len(rec_cells) else {"label": f"ACT {i+1}", "icon": ""}
+            labels[i] = (c.get("label") or f"ACT {i+1}")[:10]
+            icon_key = c.get("icon") or ""
+            if icon_key in synced_icons_library:
+                icons[i] = synced_icons_library[icon_key].get("hex", "")
+            elif icon_key in tdx_harvested_icons:
+                icons[i] = tdx_harvested_icons[icon_key].get("hex", "")
+            if i < len(radials) and len(radials[i].get("slices") or []) >= 2:
+                hold_mask |= (1 << i)
+
+        payload = {
+            "labels": labels,
+            "icons": icons,
+            "icon_w": 24,
+            "icon_h": 24,
+            "hold_mask": hold_mask,
+            "in_call": False,
+            "auto_app_mode": True,
+            "fast": True
+        }
+        if mqtt_client and mqtt_client.is_connected():
+            mqtt_client.publish(TOPIC_DISPLAY, json.dumps(payload), retain=False)
+            logger.info(f"[Auto-App 3Dconnexion] Loaded 3Dx profile '{universal_app_name}' for '{exe_name}' ({tdx_app.get('action_count')} actions, {len(radials)} radials)")
+        return
+
+    active_tdx_overlay_app = None
     app_short = get_clean_app_name(exe_name)
     universal_app_name = app_short
-    universal_app_overlay_active = True
 
     labels = [""] * 9
     icons = [""] * 9
@@ -2237,9 +2347,18 @@ def publish_universal_app_grid(exe_name: str):
         logger.info(f"[Auto-App Universal] Displayed Universal Controls for unsupported app '{exe_name}' ({app_short})")
 
 def handle_universal_app_key_tap(idx: int) -> bool:
-    """Executes universal app actions when an unsupported app is active in Auto-App Mode."""
+    """Executes 3Dconnexion profile actions or universal app actions when active in Auto-App Mode."""
     if idx < 1 or idx > 9:
         return False
+    if active_tdx_overlay_app and active_tdx_overlay_app.get("recommended_cells"):
+        cells = active_tdx_overlay_app["recommended_cells"]
+        if idx <= len(cells):
+            cell = cells[idx - 1]
+            act_str = cell.get("action", "")
+            lbl = cell.get("label", f"KEY {idx}")
+            if act_str:
+                logger.info(f">>> [3Dconnexion App Action] {universal_app_name} Key {idx} ({lbl}) -> {act_str}")
+                return execute_action_string(act_str, label=lbl)
     if idx == 1:
         publish_popup(f"APP: {universal_app_name}\nUNIVERSAL")
         return True
@@ -2281,9 +2400,10 @@ def match_app_rule(exe_name: str, win_title: str) -> Optional[dict]:
 def apply_layer_via_hub(target_layer: int, force_static: bool = False, fast: bool = True):
     """Requests the Raspberry Pi Unified Hub to push target_layer to the MacroPad.
     If target_layer == 2 (Discord) and user is in a voice call (or Demo Call), pushes the dynamic call member grid."""
-    global current_active_layer, universal_app_overlay_active
+    global current_active_layer, universal_app_overlay_active, active_tdx_overlay_app
     current_active_layer = target_layer
     universal_app_overlay_active = False
+    active_tdx_overlay_app = None
     if target_layer == 2 and not force_static:
         if discord_rpc_client and discord_rpc_client.is_authenticated:
             discord_rpc_client.refresh_voice_channel()
@@ -2308,7 +2428,7 @@ def apply_layer_via_hub(target_layer: int, force_static: bool = False, fast: boo
 def start_window_watcher():
     """Polls the active Windows foreground application every 250ms, publishes live telemetry
     to the Unified Web Dashboard, and auto-switches MacroPad layers when Auto-App Mode is active."""
-    global force_app_reeval, current_active_layer, universal_app_overlay_active
+    global force_app_reeval, current_active_layer, universal_app_overlay_active, active_tdx_overlay_app
     last_exe = ""
     last_title = ""
     last_matched_name = ""
@@ -2338,11 +2458,14 @@ def start_window_watcher():
 
             rule = match_app_rule(exe_name, win_title)
             t_layer = int(rule.get("target_layer") or rule.get("layer") or 1) if rule else None
+            tdx_match = None if rule else match_tdx_app_profile(exe_name, win_title)
             app_short = get_clean_app_name(exe_name)
             with _config_lock:
                 auto_mode = synced_app_rules.get("auto_app_mode", False)
             if rule:
                 matched_name = f"{rule.get('name')} -> L{t_layer}"
+            elif auto_mode and tdx_match:
+                matched_name = f"{tdx_match.get('name')} (3Dx Profile)"
             elif auto_mode:
                 matched_name = f"{app_short} (Universal)"
             else:
@@ -2372,15 +2495,16 @@ def start_window_watcher():
                         force_app_reeval = False
                         apply_layer_via_hub(t_layer)
                 else:
-                    # Unsupported / Untracked App: Display App Name + Universal Functions!
+                    # 3Dconnexion Auto-Profile OR Universal Fallback
                     last_auto_target_layer = None
                     if force_app_reeval or not universal_app_overlay_active or (exe_name != last_universal_exe):
                         last_universal_exe = exe_name
                         force_app_reeval = False
-                        publish_universal_app_grid(exe_name)
+                        publish_universal_app_grid(exe_name, win_title)
             else:
                 if universal_app_overlay_active:
                     universal_app_overlay_active = False
+                    active_tdx_overlay_app = None
                     last_universal_exe = ""
                     apply_layer_via_hub(current_active_layer, force_static=True)
                 last_auto_target_layer = None
