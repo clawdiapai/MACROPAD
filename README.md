@@ -1,6 +1,8 @@
 # MacroPad: Wireless ESP32-C3 E-Ink Mechanical Macro Controller
 
-A custom, battery-powered 16-key mechanical macropad featuring an ultra-low-power **1.54" E-Ink display**, **18 addressable RGB NeoPixels**, **3 rotary encoders**, and seamless **MQTT integration** with Windows, Autodesk Fusion 360, Discord, and Home Assistant.
+A custom, battery-powered 16-key mechanical macropad featuring an ultra-low-power **1.54" E-Ink display**, **18 addressable RGB NeoPixels**, **3 rotary encoders**, and seamless **MQTT integration** with Windows, Autodesk Fusion 360, Discord, Home Assistant, and **260+ pre-configured 3D/CAD/Creative applications** via the harvested 3Dconnexion library.
+
+> 📖 **See [`INTEGRATIONS.md`](INTEGRATIONS.md)** for the complete catalog of **260 application profiles**, **2,664 actions/macros**, **402 on-screen radial pie menus**, and **879 24×24 E-Ink icons**.
 
 ---
 
@@ -48,7 +50,7 @@ MACROPAD/
 │       ├── MACROPAD.ino           # ESP32-C3 core firmware (I2C, E-Ink, NeoPixels, MQTT, OTA)
 │       └── dashboard_html.h       # On-device embedded HTTP diagnostics, mode switch & OTA web server
 ├── pc_app/
-│   ├── macropad_bridge.py        # Windows companion bridge (pycaw, Discord RPC, Auto-App watcher)
+│   ├── macropad_bridge.py        # Windows companion bridge (pycaw, Discord RPC, Auto-App watcher, 3Dx engine)
 │   ├── discord_rpc.py            # Local Discord Voice RPC IPC client (mute/deafen/channel sync)
 │   ├── radial_menu.py            # Transparent Qt on-screen radial pie menus (3Dconnexion-style)
 │   ├── notification_bridge.py    # Windows toast notification interceptor (WhatsApp VIP, Phone Link)
@@ -61,16 +63,22 @@ MACROPAD/
 │       └── MacroPadFusionBridge.manifest # Autodesk Fusion Add-In manifest
 ├── pi_app/
 │   ├── app.py                    # Unified Studio web server (FastAPI, WebSockets, REST APIs)
-│   ├── studio_ui.py              # Visual Layer Editor, Icon Picker, and App Rules Studio
+│   ├── studio_ui.py              # Visual Layer Editor, Icon Picker, 3Dx Library Browser & App Rules Studio
+│   ├── backlight_ui.py           # Interactive RGB NeoPixel Backlight & Animation Studio
 │   ├── layer_manager.py          # Dynamic 16-layer store and rule matcher
 │   ├── layers_store.json         # Persistent JSON layer configuration store
+│   ├── tdx_harvested.json        # 260 harvested 3Dconnexion app profiles, 2,664 macros, 402 radial menus & 879 icons
 │   ├── icon_library.py           # 24x24 1-bit monochrome bitmap icon compiler
 │   └── macropad-dashboard.service# Systemd service unit for 24/7 background running on Pi
+├── tools/
+│   ├── harvest_3dconnexion.py    # XML parser & icon converter for 3Dconnexion 3DxWare Cfg profiles
+│   └── generate_integrations_doc.py # Generates INTEGRATIONS.md from tdx_harvested.json
 ├── home_assistant/
 │   ├── ha_configuration.yaml     # MQTT sensors & device discovery
 │   ├── ha_automations.yaml       # Layer and macro automations
 │   └── ha_scripts.yaml           # Preset execution scripts
 ├── ota_upload.py                 # Automated 1-click Wi-Fi OTA firmware flashing utility
+├── INTEGRATIONS.md               # Comprehensive catalog of all 260+ integrated applications & macros
 ├── ICON_SPEC_MANIFEST.md         # Bitmap specifications for E-Ink icons
 └── .gitignore                    # Build artifacts, tokens, logs, and database exclusions
 ```
@@ -83,11 +91,13 @@ The MacroPad supports three distinct operating modes, selectable from the **Unif
 
 1. **🤖 Auto-App Mode (`automode`)** *(Default)*:
    - The PC bridge monitors the focused Windows application in real-time.
-   - When you switch to a tracked application, the MacroPad automatically switches layers:
-     - **Autodesk Fusion 360** $\rightarrow$ Layer 13 (Sketch, Extrude, Revolve, Plane, Inspect, etc.)
-     - **Autodesk AutoCAD** $\rightarrow$ Layer 5 (Draw, Modify, Layers, Annotate)
+   - **Tier 1 Static Layer Rules**:
+     - **Autodesk Fusion 360** $\rightarrow$ Layer 13 (Native API Bridge + 8 CAD Layers + Hold Radial Menus)
+     - **Autodesk AutoCAD** $\rightarrow$ Layers 5–12 (Draw, Modify, Construct, Layers, Annotate, Snaps, Blocks, View)
      - **Adobe Photoshop** $\rightarrow$ Layer 14 (Tools, Brushes, Layers, Adjustments)
-     - **Discord** $\rightarrow$ Layer 2 (Voice Call Member Grid)
+     - **Discord** $\rightarrow$ Layer 2 (Live Voice Call Member Volume Grid)
+   - **Zero-Config 3Dconnexion Profiles (260 Apps)**:
+     - Focusing any of the **260 supported 3Dconnexion apps** (e.g., **Bambu Studio**, **OrcaSlicer**, **KiCad**, **Blender**, **SolidWorks**, **Rhino**, **ZBrush**, **Unreal Engine**, **Paint**, **Chrome/Opera/Edge**, **File Explorer**) automatically loads its tailored 9-key grid, custom 24×24 E-Ink icons, and long-press radial pie menus. See **[`INTEGRATIONS.md`](INTEGRATIONS.md)** for the full list.
    - **Untracked Applications**: Displays **Universal Controls** (App name on Cell 1, plus `COPY`, `PASTE`, `CUT`, `UNDO`, `REDO`, `FIND`, `SAVE`, and `ESC`).
 2. **🎛️ Manual Mode (`manual`)**:
    - Disables automatic switching. The pad operates statically across 16 layers (4 Banks $\times$ 4 Slots).
