@@ -1405,13 +1405,17 @@ def merge_into_tdx_harvested(
         canon = CANONICAL_APP_IDS.get(app["id"])
         if canon:
             id_to_app[canon] = app
-        # Also map by exe_match tokens for fuzzy lookup
-        for tok in re.split(r"[|,;\s]+", app.get("exe_match", "")):
+        # Also map by exact exe_match tokens for lookup (split only on |,; not whitespace)
+        for tok in re.split(r"[|,;]+", app.get("exe_match", "")):
             tok = tok.strip().lower()
-            if tok:
+            if tok and len(tok) >= 3:
+                if tok in ("adobe", "microsoft", "autodesk", "google", "app", "pro"):
+                    continue
                 id_to_app.setdefault(tok, app)
-                base = tok[:-4] if tok.endswith(".exe") else tok
-                id_to_app.setdefault(base, app)
+                if tok.endswith(".exe"):
+                    base = tok[:-4]
+                    if base not in ("adobe", "microsoft", "autodesk", "google", "app", "pro"):
+                        id_to_app.setdefault(base, app)
 
     # ── 3. Group new presets by app_id ──
     grouped = _group_app_presets(new_presets)
@@ -1429,16 +1433,19 @@ def merge_into_tdx_harvested(
         elif app_id in id_to_app:
             existing_app = id_to_app[app_id]
         else:
-            # Try matching by exe tokens
-            for tok in re.split(r"[|,;\s]+", first.get("exe_match", "")):
+            # Try matching by exe tokens (exact exe names only)
+            for tok in re.split(r"[|,;]+", first.get("exe_match", "")):
                 tok = tok.strip().lower()
+                if not tok or tok in ("adobe", "microsoft", "autodesk", "google", "app", "pro"):
+                    continue
                 if tok in id_to_app:
                     existing_app = id_to_app[tok]
                     break
-                base = tok[:-4] if tok.endswith(".exe") else tok
-                if base in id_to_app:
-                    existing_app = id_to_app[base]
-                    break
+                if tok.endswith(".exe"):
+                    base = tok[:-4]
+                    if base in id_to_app:
+                        existing_app = id_to_app[base]
+                        break
 
         if not existing_app:
             # New app not in 3Dconnexion catalog — create new entry

@@ -1007,6 +1007,7 @@ def harvest():
             elif btype == "Keyboard":
                 mp_act = local_macros.get(aid) or normalize_shortcut_str(aid)
             elif btype == "AppCommand":
+                appcmd_val = (ba.findtext("AppCmdID") or "").strip()
                 if aid in APPCMD_ID_TO_ACTION:
                     nm, mp_act = APPCMD_ID_TO_ACTION[aid]
                 elif "CMDACAD:ID_" in aid:
@@ -1023,12 +1024,39 @@ def harvest():
                         mp_act = APPCMD_NAME_TO_ACTION[nm.lower()]
                     elif clean_lookup in APPCMD_NAME_TO_ACTION:
                         mp_act = APPCMD_NAME_TO_ACTION[clean_lookup]
+
+                # Full AppCommand resolution — NEVER DROP!
+                if not mp_act:
+                    target_cmd = appcmd_val or (aid[11:] if aid.startswith("AppCommand_") else aid)
+                    if "fusion" in fname.lower() or "fusion" in app_name.lower():
+                        mp_act = f"fusion:{target_cmd}"
+                    elif "acad" in fname.lower() or "autocad" in app_name.lower():
+                        mp_act = f"cad_cmd:_{target_cmd.upper()}"
+                    else:
+                        mp_act = f"cad_cmd:{target_cmd}"
             elif aid in view_ovr:
                 nm, mp_act = view_ovr[aid]
             elif aid in STANDARD_ACTION_MAP:
                 std_nm, mp_act = STANDARD_ACTION_MAP[aid]
                 if not nm or nm == aid:
                     nm = std_nm
+            elif aid.startswith("MotionMacro_Wheel_") or aid.startswith("V3DCMD_VIEW_QZ_"):
+                if "In" in aid:
+                    mp_act = "hotkey:CTRL+="
+                    nm = nm or "Zoom In"
+                else:
+                    mp_act = "hotkey:CTRL+-"
+                    nm = nm or "Zoom Out"
+            elif aid in ("V3DCMD_VIEW_FIT", "V3DK_FIT", "App_ResetYourView"):
+                mp_act = "hotkey:F"
+                nm = nm or "Fit View"
+            else:
+                # Any other named action (Macro, App, or custom) — NEVER DROP!
+                if nm and not nm.startswith("STR_APP_PASSTO"):
+                    if "fusion" in fname.lower() or "fusion" in app_name.lower():
+                        mp_act = f"fusion:{aid}"
+                    else:
+                        mp_act = f"cad_cmd:{aid}"
 
             if mp_act:
                 ico = pre_ico or extract_ba_icon(ba, nm, mp_act, aid=aid)
@@ -1114,19 +1142,69 @@ def harvest():
                     "icon": aobj["icon"],
                 })
 
-        exe_match_str = "|".join(exes)
-        app_id = re.sub(r"[^a-z0-9_]+", "_", os.path.splitext(fname)[0].lower()).strip("_")
-
-        apps_by_key[app_id] = {
-            "id": app_id,
-            "name": app_name,
-            "xml_file": fname,
-            "exe_match": exe_match_str,
-            "exes": exes,
-            "action_count": len(unique_actions),
-            "actions": unique_actions,
-            "radial_menus": radial_menus,
+        raw_app_id = re.sub(r"[^a-z0-9_]+", "_", os.path.splitext(fname)[0].lower()).strip("_")
+        CANONICAL_XML_APP_MAP = {
+            "fusion360fs": ("fusion360", "Autodesk Fusion", ["fusion360.exe", "fusion.exe"]),
+            "fusion360": ("fusion360", "Autodesk Fusion", ["fusion360.exe", "fusion.exe"]),
+            "rhinofs": ("rhino", "Rhinoceros", ["rhino.exe", "rhino6.exe", "rhino7.exe", "rhino8.exe"]),
+            "rhinonl": ("rhino", "Rhinoceros", ["rhino.exe", "rhino6.exe", "rhino7.exe", "rhino8.exe"]),
+            "rhino": ("rhino", "Rhinoceros", ["rhino.exe", "rhino6.exe", "rhino7.exe", "rhino8.exe"]),
+            "freecad_navlib": ("freecad", "FreeCAD", ["freecad.exe"]),
+            "freecad": ("freecad", "FreeCAD", ["freecad.exe"]),
+            "3dxinventor": ("inventor", "Autodesk Inventor", ["inventor.exe"]),
+            "inventor": ("inventor", "Autodesk Inventor", ["inventor.exe"]),
+            "3dxsolidworks": ("solidworks", "SolidWorks", ["sldworks.exe"]),
+            "solidworks": ("solidworks", "SolidWorks", ["sldworks.exe"]),
+            "autocadlt": ("autocad", "AutoCAD", ["acad.exe", "acadlt.exe"]),
+            "autocad": ("autocad", "AutoCAD", ["acad.exe"]),
+            "3dexperience_fs": ("3dexperience", "3DEXPERIENCE", ["3dexperience.exe"]),
+            "3dexperience": ("3dexperience", "3DEXPERIENCE", ["3dexperience.exe"]),
+            "sidefx_houdinicore": ("sidefx_houdini", "SideFX Houdini", ["houdini.exe", "hindie.exe"]),
+            "sidefx_houdini": ("sidefx_houdini", "SideFX Houdini", ["houdini.exe", "hindie.exe"]),
+            "proe": ("proe", "PTC Creo Parametric", ["xtop.exe", "proe.exe", "parametric.exe"]),
+            "ugsnx": ("ugsnx", "Siemens NX", ["ugraf.exe"]),
         }
+
+        if raw_app_id in CANONICAL_XML_APP_MAP:
+            target_id, canon_name, extra_exes = CANONICAL_XML_APP_MAP[raw_app_id]
+            app_id = target_id
+            app_name = canon_name
+            for ee in extra_exes:
+                if ee.lower() not in [e.lower() for e in exes]:
+                    exes.append(ee.lower())
+        else:
+            app_id = raw_app_id
+
+        exe_match_str = "|".join(exes)
+
+        if app_id in apps_by_key:
+            # Merge into existing canonical profile
+            existing_entry = apps_by_key[app_id]
+            existing_acts = existing_entry["actions"]
+            seen_acts = {(a["label"], a["action"]) for a in existing_acts}
+            for na in unique_actions:
+                if (na["label"], na["action"]) not in seen_acts:
+                    seen_acts.add((na["label"], na["action"]))
+                    existing_acts.append(na)
+            existing_entry["action_count"] = len(existing_acts)
+            for e in exes:
+                if e not in existing_entry["exes"]:
+                    existing_entry["exes"].append(e)
+            existing_entry["exe_match"] = "|".join(existing_entry["exes"])
+            for rm in radial_menus:
+                if rm["id"] not in [r["id"] for r in existing_entry["radial_menus"]]:
+                    existing_entry["radial_menus"].append(rm)
+        else:
+            apps_by_key[app_id] = {
+                "id": app_id,
+                "name": app_name,
+                "xml_file": fname,
+                "exe_match": exe_match_str,
+                "exes": exes,
+                "action_count": len(unique_actions),
+                "actions": unique_actions,
+                "radial_menus": radial_menus,
+            }
 
     # Merge KiCad Eeschema + KiCad PCB actions into the base KiCad profile so kicad.exe always has a full icon-rich grid
     if "kicad" in apps_by_key:

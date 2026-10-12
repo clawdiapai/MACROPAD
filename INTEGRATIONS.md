@@ -1,6 +1,6 @@
 # 🧩 MacroPad Comprehensive Application Integrations Catalog
 
-This document provides the complete reference of all **native API bridges**, **multi-layer static application profiles**, and **312 multi-source peripheral driver presets** (3Dconnexion, Loupedeck, TourBox, Wacom, PowerUser) built into the MacroPad ecosystem.
+This document provides the complete reference of all **native API bridges**, **multi-layer static application profiles**, and **307 multi-source peripheral driver presets** (3Dconnexion, Loupedeck, TourBox, Wacom, PowerUser) built into the MacroPad ecosystem.
 
 ---
 
@@ -8,11 +8,11 @@ This document provides the complete reference of all **native API bridges**, **m
 
 | Metric | Count | Description |
 | :--- | :---: | :--- |
-| **Total Application Profiles** | **312** | Pre-configured application definitions across CAD, Creative Suite, Coding, Streaming & Productivity |
-| **Hardware Driver Presets** | **398** | Hardware profiles harvested across 3Dconnexion, Loupedeck, TourBox, Wacom & PowerUser |
-| **Multi-Source Preset Apps** | **70** | Applications with selectable presets (e.g. choose between 3Dx, Loupedeck, TourBox, Wacom, or PowerUser) |
-| **Executable Actions & Macros** | **2,810** | Ready-to-use `hotkey:...`, `keyseq:...`, and `cad_cmd:...` actions available in Unified Studio |
-| **On-Screen Radial Pie Menus** | **427** | 4-slice and 8-slice long-press radial pie menus (`radial_menu.py`) |
+| **Total Application Profiles** | **307** | Pre-configured application definitions across CAD, Creative Suite, Coding, Streaming & Productivity |
+| **Hardware Driver Presets** | **339** | Full hardware preset profiles harvested across 3Dconnexion, Loupedeck, TourBox, Wacom & PowerUser |
+| **Multi-Source Preset Apps** | **25** | Applications with selectable multi-driver presets (e.g. choose between 3Dx, Loupedeck, TourBox, Wacom, or PowerUser) |
+| **Executable Actions & Macros** | **8,095** | Complete unconstrained assignable options (`hotkey:...`, `keyseq:...`, `fusion:...`, `cad_cmd:...`) in Unified Studio |
+| **On-Screen Radial Pie Menus** | **759** | 4-slice and 8-slice long-press radial pie menus (`radial_menu.py`) |
 | **24×24 1-Bit E-Ink Icons** | **3,560** | Dithered monochrome hardware icons compiled into `icon_library.py` |
 | **Dedicated Static Hardware Layers** | **16** | 4 Banks × 4 Slots (`Layer 1` – `Layer 16`) stored in `layers_store.json` |
 
