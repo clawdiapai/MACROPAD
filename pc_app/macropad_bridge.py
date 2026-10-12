@@ -2302,39 +2302,67 @@ def publish_universal_app_grid(exe_name: str, win_title: str = ""):
     tdx_app = match_tdx_app_profile(exe_name, win_title)
     universal_app_overlay_active = True
 
-    if tdx_app and tdx_app.get("recommended_cells"):
-        active_tdx_overlay_app = tdx_app
-        universal_app_name = tdx_app.get("name", get_clean_app_name(exe_name))
-        rec_cells = tdx_app["recommended_cells"]
-        radials = tdx_app.get("radial_menus") or []
-        labels = [""] * 9
-        icons = [""] * 9
-        hold_mask = 0
-        for i in range(9):
-            c = rec_cells[i] if i < len(rec_cells) else {"label": f"ACT {i+1}", "icon": ""}
-            labels[i] = (c.get("label") or f"ACT {i+1}")[:10]
-            icon_key = c.get("icon") or ""
-            if icon_key in synced_icons_library:
-                icons[i] = synced_icons_library[icon_key].get("hex", "")
-            elif icon_key in tdx_harvested_icons:
-                icons[i] = tdx_harvested_icons[icon_key].get("hex", "")
-            if i < len(radials) and len(radials[i].get("slices") or []) >= 2:
-                hold_mask |= (1 << i)
+    if tdx_app:
+        # Determine preferred preset source (user override from Hub, or app default)
+        selected_source = ""
+        with _config_lock:
+            selected_source = (synced_app_rules.get("selected_app_presets") or {}).get(tdx_app.get("id"), "")
+        if not selected_source:
+            selected_source = tdx_app.get("selected_preset_source", "3Dconnexion")
 
-        payload = {
-            "labels": labels,
-            "icons": icons,
-            "icon_w": 24,
-            "icon_h": 24,
-            "hold_mask": hold_mask,
-            "in_call": False,
-            "auto_app_mode": True,
-            "fast": True
-        }
-        if mqtt_client and mqtt_client.is_connected():
-            mqtt_client.publish(TOPIC_DISPLAY, json.dumps(payload), retain=False)
-            logger.info(f"[Auto-App 3Dconnexion] Loaded 3Dx profile '{universal_app_name}' for '{exe_name}' ({tdx_app.get('action_count')} actions, {len(radials)} radials)")
-        return
+        # Find matching preset if available
+        matched_preset = None
+        for p in (tdx_app.get("presets") or []):
+            if p.get("source") == selected_source:
+                matched_preset = p
+                break
+
+        if matched_preset and matched_preset.get("recommended_cells"):
+            rec_cells = matched_preset["recommended_cells"]
+            radials = matched_preset.get("radial_menus") or []
+            src_name = matched_preset.get("source", "Preset")
+        else:
+            rec_cells = tdx_app.get("recommended_cells") or []
+            radials = tdx_app.get("radial_menus") or []
+            src_name = tdx_app.get("source", "3Dconnexion")
+
+        if rec_cells:
+            active_tdx_overlay_app = {
+                "id": tdx_app.get("id"),
+                "name": tdx_app.get("name"),
+                "source": src_name,
+                "recommended_cells": rec_cells,
+                "radial_menus": radials
+            }
+            universal_app_name = tdx_app.get("name", get_clean_app_name(exe_name))
+            labels = [""] * 9
+            icons = [""] * 9
+            hold_mask = 0
+            for i in range(9):
+                c = rec_cells[i] if i < len(rec_cells) else {"label": f"ACT {i+1}", "icon": ""}
+                labels[i] = (c.get("label") or f"ACT {i+1}")[:10]
+                icon_key = c.get("icon") or ""
+                if icon_key in synced_icons_library:
+                    icons[i] = synced_icons_library[icon_key].get("hex", "")
+                elif icon_key in tdx_harvested_icons:
+                    icons[i] = tdx_harvested_icons[icon_key].get("hex", "")
+                if i < len(radials) and len(radials[i].get("slices") or []) >= 2:
+                    hold_mask |= (1 << i)
+
+            payload = {
+                "labels": labels,
+                "icons": icons,
+                "icon_w": 24,
+                "icon_h": 24,
+                "hold_mask": hold_mask,
+                "in_call": False,
+                "auto_app_mode": True,
+                "fast": True
+            }
+            if mqtt_client and mqtt_client.is_connected():
+                mqtt_client.publish(TOPIC_DISPLAY, json.dumps(payload), retain=False)
+                logger.info(f"[Auto-App Profile] Loaded [{src_name}] preset '{universal_app_name}' for '{exe_name}' ({len(rec_cells)} keys, {len(radials)} radials)")
+            return
 
     active_tdx_overlay_app = None
     app_short = get_clean_app_name(exe_name)

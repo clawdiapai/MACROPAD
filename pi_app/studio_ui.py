@@ -1107,26 +1107,37 @@ STUDIO_HTML_CONTENT = r"""<!DOCTYPE html>
 
 <!-- ================= 3DCONNEXION APP LIBRARY MODAL (260+ APPS) ================= -->
 <div id="tdx-library-modal" style="display:none; position:fixed; inset:0; z-index:9999; background:rgba(8,10,14,0.84); backdrop-filter:blur(6px); align-items:center; justify-content:center; padding:24px;">
-  <div style="width:100%; max-width:1100px; height:84vh; background:var(--bg-panel); border:1px solid var(--border); border-radius:16px; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 24px 64px rgba(0,0,0,0.75);">
+  <div style="width:100%; max-width:1160px; height:86vh; background:var(--bg-panel); border:1px solid var(--border); border-radius:16px; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 24px 64px rgba(0,0,0,0.75);">
     <!-- Header -->
     <div style="padding:14px 20px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; background:var(--bg-card);">
       <div style="display:flex; align-items:center; gap:12px;">
         <span style="font-size:22px;">📦</span>
         <div>
-          <div style="font-size:15px; font-weight:800; color:#fff;">3Dconnexion Harvested Application Library</div>
-          <div id="tdx-stats-subtitle" style="font-size:11px; color:var(--text-muted);">260+ Preconfigured Application Integrations • 2,664 Functions • 402 Radial Pie Menus • 879 E-Ink Icons</div>
+          <div style="font-size:15px; font-weight:800; color:#fff;">Multi-Driver Harvested Application Library</div>
+          <div id="tdx-stats-subtitle" style="font-size:11px; color:var(--text-muted);">312 Apps • 398 Driver Presets across 3Dconnexion, Loupedeck, TourBox, Wacom & PowerUser</div>
         </div>
       </div>
       <div style="display:flex; gap:10px; align-items:center;">
-        <input type="text" id="tdx-search-input" class="input-field" placeholder="🔍 Search app or .exe (e.g. Blender, Bambu, Prusa, Plasticity, Rhino, Substance...)" oninput="renderTdxAppList()" style="width:360px; padding:7px 12px;">
+        <input type="text" id="tdx-search-input" class="input-field" placeholder="🔍 Search app or .exe (Blender, Photoshop, Premiere, Bambu, Krita, KiCad...)" oninput="renderTdxAppList()" style="width:340px; padding:7px 12px;">
         <button class="btn" onclick="closeTdxLibraryModal()" style="padding:6px 12px;">✕ Close</button>
       </div>
     </div>
 
     <!-- Body: Left App List + Right App Inspector & Layer Importer -->
-    <div style="flex:1; display:grid; grid-template-columns:340px 1fr; overflow:hidden;">
-      <!-- Left App List -->
-      <div id="tdx-app-list" style="border-right:1px solid var(--border); overflow-y:auto; padding:10px; display:flex; flex-direction:column; gap:6px; background:rgba(0,0,0,0.18);"></div>
+    <div style="flex:1; display:grid; grid-template-columns:360px 1fr; overflow:hidden;">
+      <!-- Left Column: Source Filter Pills + App List -->
+      <div style="border-right:1px solid var(--border); display:flex; flex-direction:column; background:rgba(0,0,0,0.18); overflow:hidden;">
+        <div id="tdx-source-filters" style="padding:8px 10px; border-bottom:1px solid var(--border); display:flex; gap:4px; flex-wrap:wrap; background:rgba(0,0,0,0.12);">
+          <button class="btn btn-src-filter active" onclick="setTdxSourceFilter('all')" data-src="all" style="padding:3px 7px; font-size:10px;">All</button>
+          <button class="btn btn-src-filter" onclick="setTdxSourceFilter('3Dconnexion')" data-src="3Dconnexion" style="padding:3px 7px; font-size:10px;">🧊 3Dx</button>
+          <button class="btn btn-src-filter" onclick="setTdxSourceFilter('Loupedeck')" data-src="Loupedeck" style="padding:3px 7px; font-size:10px;">🎛️ LD</button>
+          <button class="btn btn-src-filter" onclick="setTdxSourceFilter('TourBox')" data-src="TourBox" style="padding:3px 7px; font-size:10px;">🎮 TB</button>
+          <button class="btn btn-src-filter" onclick="setTdxSourceFilter('Wacom')" data-src="Wacom" style="padding:3px 7px; font-size:10px;">✒️ Wacom</button>
+          <button class="btn btn-src-filter" onclick="setTdxSourceFilter('PowerUser')" data-src="PowerUser" style="padding:3px 7px; font-size:10px;">⚡ Power</button>
+          <button class="btn btn-src-filter" onclick="setTdxSourceFilter('multi')" data-src="multi" style="padding:3px 7px; font-size:10px; color:var(--accent-amber);">🔀 Multi</button>
+        </div>
+        <div id="tdx-app-list" style="flex:1; overflow-y:auto; padding:10px; display:flex; flex-direction:column; gap:6px;"></div>
+      </div>
 
       <!-- Right App Preview & Importer -->
       <div id="tdx-app-detail" style="overflow-y:auto; padding:18px; display:flex; flex-direction:column; gap:16px;"></div>
@@ -1141,6 +1152,8 @@ STUDIO_HTML_CONTENT = r"""<!DOCTYPE html>
   let tdxCatalogApps = [];
   let tdxStats = {};
   let selectedTdxAppId = "blender";
+  let selectedTdxSourceFilter = "all";
+  let selectedDetailPresetSource = "";
   let appRulesConfig = {
     auto_app_mode: true,
     untracked_behavior: 'stay',
@@ -2258,7 +2271,66 @@ STUDIO_HTML_CONTENT = r"""<!DOCTYPE html>
     }
   }
 
-  // ================= 6. 3DCONNEXION HARVESTED APP LIBRARY & IMPORTER =================
+  // ================= 6. MULTI-DRIVER HARVESTED APP LIBRARY & IMPORTER =================
+  function getSourceIcon(src) {
+    if (src === '3Dconnexion') return '🧊';
+    if (src === 'Loupedeck') return '🎛️';
+    if (src === 'TourBox') return '🎮';
+    if (src === 'Wacom') return '✒️';
+    if (src === 'PowerUser') return '⚡';
+    return '📦';
+  }
+
+  function getSourceBadge(src) {
+    let color = 'var(--text-muted)';
+    let bg = 'rgba(255,255,255,0.06)';
+    if (src === '3Dconnexion') { color = 'var(--accent-cyan)'; bg = 'rgba(0,229,255,0.12)'; }
+    else if (src === 'Loupedeck') { color = 'var(--accent-pink)'; bg = 'rgba(255,64,129,0.12)'; }
+    else if (src === 'TourBox') { color = 'var(--accent-amber)'; bg = 'rgba(255,171,0,0.12)'; }
+    else if (src === 'Wacom') { color = '#b388ff'; bg = 'rgba(179,136,255,0.12)'; }
+    else if (src === 'PowerUser') { color = 'var(--accent-green)'; bg = 'rgba(0,230,118,0.12)'; }
+    return `<span style="font-size:9.5px; font-weight:700; padding:1px 5px; border-radius:3px; background:${bg}; color:${color};">${getSourceIcon(src)} ${escapeHtml(src)}</span>`;
+  }
+
+  function setTdxSourceFilter(src) {
+    selectedTdxSourceFilter = src;
+    document.querySelectorAll('.btn-src-filter').forEach(b => {
+      if (b.getAttribute('data-src') === src) {
+        b.classList.add('active');
+        b.style.background = 'var(--accent-cyan)';
+        b.style.color = '#000';
+      } else {
+        b.classList.remove('active');
+        b.style.background = '';
+        b.style.color = '';
+      }
+    });
+    renderTdxAppList();
+  }
+
+  function selectDetailPresetSource(src) {
+    selectedDetailPresetSource = src;
+    renderTdxAppDetail();
+  }
+
+  async function setDefaultPresetForApp(appId, src) {
+    try {
+      const res = await fetch('/api/tdx/select_preset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ app_id: appId, source: src })
+      });
+      const data = await res.json();
+      const app = tdxCatalogApps.find(a => a.id === appId);
+      if (app) app.selected_preset_source = src;
+      renderTdxAppDetail();
+      renderTdxAppList();
+      showToast(`Default preset for ${app ? app.name : appId} set to ${src}`);
+    } catch (e) {
+      console.error('Error selecting preset:', e);
+    }
+  }
+
   async function loadTdxCatalog() {
     try {
       const res = await fetch('/api/tdx/catalog');
@@ -2267,12 +2339,11 @@ STUDIO_HTML_CONTENT = r"""<!DOCTYPE html>
       tdxStats = data.stats || {};
       const subEl = document.getElementById('tdx-stats-subtitle');
       if (subEl && tdxStats.total_apps) {
-        subEl.textContent = `${tdxStats.total_apps} Preconfigured Apps (${tdxStats.apps_with_actions || 187} with Custom Shortcuts) • ${tdxStats.total_actions || 2664} Executable Functions • ${tdxStats.total_radial_menus || 402} Radial Pie Menus • ${tdxStats.total_icons || 879} E-Ink Icons`;
+        subEl.textContent = `${tdxStats.total_apps} Apps • ${tdxStats.total_preset_entries || 398} Driver Presets across 5 Hardware Sources • ${tdxStats.total_radial_menus || 427} Radial Pie Menus • ${tdxStats.total_icons || 3560} E-Ink Icons`;
       }
-      // Dynamically merge harvested apps with actions into ACTION_CATALOG for Guided Action Picker
       for (const app of tdxCatalogApps) {
         if (!app.actions || app.actions.length === 0) continue;
-        const grpName = `📦 3Dx: ${app.name}`;
+        const grpName = `📦 ${app.name}`;
         if (!ACTION_CATALOG.some(g => g.group === grpName)) {
           ACTION_CATALOG.push({
             group: grpName,
@@ -2286,7 +2357,7 @@ STUDIO_HTML_CONTENT = r"""<!DOCTYPE html>
         }
       }
     } catch (e) {
-      console.warn('Could not load 3Dconnexion catalog:', e);
+      console.warn('Could not load multi-driver catalog:', e);
     }
   }
 
@@ -2294,7 +2365,7 @@ STUDIO_HTML_CONTENT = r"""<!DOCTYPE html>
     const modal = document.getElementById('tdx-library-modal');
     if (!modal) return;
     modal.style.display = 'flex';
-    // Auto-select focused app if it matches a 3Dconnexion profile
+    selectedDetailPresetSource = '';
     const focusedExe = (liveDeviceState.focused_app_exe || '').toLowerCase();
     if (focusedExe) {
       const matched = tdxCatalogApps.find(a => (a.exe_match || '').toLowerCase().includes(focusedExe));
@@ -2309,11 +2380,24 @@ STUDIO_HTML_CONTENT = r"""<!DOCTYPE html>
     if (modal) modal.style.display = 'none';
   }
 
+  function selectTdxApp(appId) {
+    selectedTdxAppId = appId;
+    selectedDetailPresetSource = '';
+    renderTdxAppList();
+    renderTdxAppDetail();
+  }
+
   function renderTdxAppList() {
     const listEl = document.getElementById('tdx-app-list');
     if (!listEl) return;
     const q = (document.getElementById('tdx-search-input')?.value || '').trim().toLowerCase();
     const filtered = tdxCatalogApps.filter(a => {
+      if (selectedTdxSourceFilter === 'multi') {
+        if ((a.presets || []).length <= 1) return false;
+      } else if (selectedTdxSourceFilter !== 'all') {
+        const hasSource = (a.presets || []).some(p => p.source === selectedTdxSourceFilter) || a.source === selectedTdxSourceFilter;
+        if (!hasSource) return false;
+      }
       if (!q) return true;
       return (a.name || '').toLowerCase().includes(q) ||
              (a.exe_match || '').toLowerCase().includes(q) ||
@@ -2322,26 +2406,30 @@ STUDIO_HTML_CONTENT = r"""<!DOCTYPE html>
 
     listEl.innerHTML = filtered.map(a => {
       const isSel = a.id === selectedTdxAppId;
-      const menuCount = (a.radial_menus || []).length;
+      const presets = a.presets || [];
+      const presetCount = presets.length;
+      const activeSrc = a.selected_preset_source || (presets[0] ? presets[0].source : a.source) || '3Dconnexion';
       return `
-        <div onclick="selectTdxApp('${escapeHtml(a.id)}')" style="padding:9px 11px; border-radius:8px; cursor:pointer; border:1px solid ${isSel ? 'var(--accent-cyan)' : 'var(--border)'}; background:${isSel ? 'rgba(0,229,255,0.12)' : 'var(--bg-card)'}; display:flex; align-items:center; justify-content:space-between; gap:8px;">
-          <div style="min-width:0;">
-            <div style="font-size:12.5px; font-weight:700; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(a.name)}</div>
-            <div style="font-size:10px; font-family:var(--font-mono); color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(a.exe_match || a.xml_file)}</div>
+        <div onclick="selectTdxApp('${escapeHtml(a.id)}')" style="padding:9px 11px; border-radius:8px; cursor:pointer; border:1px solid ${isSel ? 'var(--accent-cyan)' : 'var(--border)'}; background:${isSel ? 'rgba(0,229,255,0.12)' : 'var(--bg-card)'}; display:flex; flex-direction:column; gap:5px;">
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+            <div style="min-width:0;">
+              <div style="font-size:12.5px; font-weight:700; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(a.name)}</div>
+              <div style="font-size:10px; font-family:var(--font-mono); color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(a.exe_match || a.xml_file)}</div>
+            </div>
+            <div style="display:flex; gap:4px; flex-shrink:0;">
+              ${presetCount > 1 ? `<span style="font-size:9.5px; font-weight:800; padding:2px 5px; border-radius:4px; background:rgba(255,171,0,0.18); color:var(--accent-amber);">🔀 ${presetCount}</span>` : ''}
+              <span style="font-size:10px; font-weight:700; padding:2px 6px; border-radius:4px; background:${a.action_count > 0 ? 'rgba(0,230,118,0.15)' : 'rgba(255,255,255,0.06)'}; color:${a.action_count > 0 ? 'var(--accent-green)' : 'var(--text-muted)'};">${a.action_count} fn</span>
+            </div>
           </div>
-          <div style="display:flex; gap:4px; flex-shrink:0;">
-            <span style="font-size:10px; font-weight:700; padding:2px 6px; border-radius:4px; background:${a.action_count > 0 ? 'rgba(0,230,118,0.15)' : 'rgba(255,255,255,0.06)'}; color:${a.action_count > 0 ? 'var(--accent-green)' : 'var(--text-muted)'};">${a.action_count} fn</span>
-            ${menuCount > 0 ? `<span style="font-size:10px; font-weight:700; padding:2px 6px; border-radius:4px; background:rgba(0,229,255,0.15); color:var(--accent-cyan);">🎡 ${menuCount}</span>` : ''}
+          <div style="display:flex; gap:3px; flex-wrap:wrap; align-items:center;">
+            ${presets.map(p => {
+              const isAct = p.source === activeSrc;
+              return `<span style="font-size:8.5px; padding:1px 4px; border-radius:3px; background:${isAct ? 'rgba(0,229,255,0.2)' : 'rgba(255,255,255,0.06)'}; color:${isAct ? 'var(--accent-cyan)' : 'var(--text-muted)'}; font-weight:${isAct ? '700' : '400'};">${getSourceIcon(p.source)} ${escapeHtml(p.source)}</span>`;
+            }).join('')}
           </div>
         </div>
       `;
     }).join('');
-  }
-
-  function selectTdxApp(appId) {
-    selectedTdxAppId = appId;
-    renderTdxAppList();
-    renderTdxAppDetail();
   }
 
   function renderTdxAppDetail() {
@@ -2349,9 +2437,18 @@ STUDIO_HTML_CONTENT = r"""<!DOCTYPE html>
     if (!detailEl) return;
     const app = tdxCatalogApps.find(a => a.id === selectedTdxAppId) || tdxCatalogApps[0];
     if (!app) {
-      detailEl.innerHTML = `<div style="color:var(--text-muted);">No 3Dconnexion profiles loaded.</div>`;
+      detailEl.innerHTML = `<div style="color:var(--text-muted);">No driver profiles loaded.</div>`;
       return;
     }
+
+    const presets = app.presets || [];
+    let currentSource = selectedDetailPresetSource || app.selected_preset_source || (presets[0] ? presets[0].source : app.source) || '3Dconnexion';
+    let matchedPreset = presets.find(p => p.source === currentSource) || presets[0] || null;
+    if (matchedPreset) currentSource = matchedPreset.source;
+
+    const recCells = (matchedPreset && matchedPreset.recommended_cells) ? matchedPreset.recommended_cells : (app.recommended_cells || []);
+    const radials = (matchedPreset && matchedPreset.radial_menus) ? matchedPreset.radial_menus : (app.radial_menus || []);
+    const actions = (matchedPreset && matchedPreset.actions) ? matchedPreset.actions : (app.actions || []);
 
     const layerOptions = Array.from({ length: 16 }, (_, i) => {
       const lid = i + 1;
@@ -2362,8 +2459,35 @@ STUDIO_HTML_CONTENT = r"""<!DOCTYPE html>
       return `<option value="${lid}" ${sel}>Layer ${lid} (Bank ${bank}·${slot}) — ${escapeHtml(lName)}</option>`;
     }).join('');
 
-    const recCells = app.recommended_cells || [];
-    const radials = app.radial_menus || [];
+    // Preset source tabs if app has multiple presets
+    const presetSelectorHtml = presets.length > 1 ? `
+      <div style="background:var(--bg-card); border:1px solid rgba(0,229,255,0.25); border-radius:10px; padding:10px 14px; display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <span style="font-size:11px; font-weight:800; color:var(--text-muted); text-transform:uppercase;">Hardware Preset:</span>
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            ${presets.map(p => {
+              const isCur = p.source === currentSource;
+              return `
+                <button class="btn" onclick="selectDetailPresetSource('${escapeHtml(p.source)}')" style="padding:4px 10px; font-size:11px; font-weight:700; border-radius:6px; border:1px solid ${isCur ? 'var(--accent-cyan)' : 'var(--border)'}; background:${isCur ? 'var(--accent-cyan)' : 'var(--bg-panel)'}; color:${isCur ? '#000' : '#fff'};">
+                  ${getSourceIcon(p.source)} ${escapeHtml(p.source)} <span style="font-size:9.5px; opacity:0.8;">(${p.action_count || (p.actions||[]).length} fn)</span>
+                </button>
+              `;
+            }).join('')}
+          </div>
+        </div>
+        <div>
+          ${app.selected_preset_source === currentSource ? `
+            <span style="font-size:11px; font-weight:700; color:var(--accent-green); display:flex; align-items:center; gap:4px;">
+              <span>✓</span> Active Preset for Auto-App
+            </span>
+          ` : `
+            <button class="btn" onclick="setDefaultPresetForApp('${escapeHtml(app.id)}', '${escapeHtml(currentSource)}')" style="padding:4px 10px; font-size:11px; font-weight:700; border-color:var(--accent-cyan); color:var(--accent-cyan);">
+              ⭐ Set as Default for Auto-App
+            </button>
+          `}
+        </div>
+      </div>
+    ` : '';
 
     const cellsPreviewHtml = recCells.map((c, idx) => {
       const hasRm = idx < radials.length;
@@ -2385,9 +2509,9 @@ STUDIO_HTML_CONTENT = r"""<!DOCTYPE html>
           ${rm.slices.map(s => `<span style="font-size:10px; background:rgba(255,255,255,0.06); padding:2px 7px; border-radius:4px; border:1px solid var(--border);"><strong>${escapeHtml(s.name)}</strong> <code style="color:var(--accent-amber);">${escapeHtml(s.action)}</code></span>`).join('')}
         </div>
       </div>
-    `).join('') : `<div style="font-size:11px; color:var(--text-muted);">No custom Radial Pie Menus in this XML profile.</div>`;
+    `).join('') : `<div style="font-size:11px; color:var(--text-muted);">No custom Radial Pie Menus for this preset.</div>`;
 
-    const allActionsHtml = (app.actions || []).map((a, aIdx) => `
+    const allActionsHtml = (actions || []).map((a, aIdx) => `
       <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:8px; padding:7px 10px; display:flex; align-items:center; justify-content:space-between; gap:8px;">
         <div style="display:flex; align-items:center; gap:8px; min-width:0;">
           <canvas id="tdx-act-ico-${aIdx}" width="24" height="24" style="width:24px; height:24px; image-rendering:pixelated; background:#14171f; border-radius:4px; flex-shrink:0;"></canvas>
@@ -2407,9 +2531,12 @@ STUDIO_HTML_CONTENT = r"""<!DOCTYPE html>
       <div style="background:var(--bg-card); border:1px solid rgba(0,229,255,0.35); border-radius:12px; padding:14px 16px; display:flex; flex-direction:column; gap:12px;">
         <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
           <div>
-            <div style="font-size:17px; font-weight:800; color:#fff;">${escapeHtml(app.name)}</div>
-            <div style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono);">
-              Executable Match: <strong style="color:var(--accent-cyan);">${escapeHtml(app.exe_match || 'Manual Layer Only')}</strong> • Source: ${escapeHtml(app.xml_file)}
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-size:17px; font-weight:800; color:#fff;">${escapeHtml(app.name)}</span>
+              ${getSourceBadge(currentSource)}
+            </div>
+            <div style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono); margin-top:2px;">
+              Executable: <strong style="color:var(--accent-cyan);">${escapeHtml(app.exe_match || 'Manual Layer Only')}</strong> • Source: <strong>${escapeHtml(currentSource)}</strong>
             </div>
           </div>
           <div style="display:flex; gap:8px; align-items:center;">
@@ -2422,7 +2549,7 @@ STUDIO_HTML_CONTENT = r"""<!DOCTYPE html>
         <div style="display:flex; gap:18px; flex-wrap:wrap; font-size:11.5px; color:var(--text-muted);">
           <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
             <input type="checkbox" id="tdx-chk-radials" checked style="accent-color:var(--accent-cyan);">
-            Include Hold Radial Pie Menus (${radials.length})
+            Include Radial Menus (${radials.length})
           </label>
           <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
             <input type="checkbox" id="tdx-chk-autorule" checked style="accent-color:var(--accent-cyan);">
@@ -2435,32 +2562,35 @@ STUDIO_HTML_CONTENT = r"""<!DOCTYPE html>
         </div>
       </div>
 
+      <!-- Preset Selector Bar (if multi-source) -->
+      ${presetSelectorHtml}
+
       <!-- Middle: 3x3 E-Ink Preview + Radial Menus -->
       <div style="display:grid; grid-template-columns:230px 1fr; gap:16px; align-items:start;">
         <div>
-          <div style="font-size:11px; font-weight:700; color:var(--text-muted); margin-bottom:6px; text-transform:uppercase;">3×3 E-Ink Layer Preview</div>
+          <div style="font-size:11px; font-weight:700; color:var(--text-muted); margin-bottom:6px; text-transform:uppercase;">3×3 E-Ink Layer Preview (${escapeHtml(currentSource)})</div>
           <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:5px; background:#14171f; padding:8px; border-radius:10px; border:1px solid var(--border);">
             ${cellsPreviewHtml}
           </div>
         </div>
         <div style="display:flex; flex-direction:column; gap:8px;">
-          <div style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase;">Harvested 3Dconnexion Radial Pie Menus (${radials.length})</div>
+          <div style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase;">Preset Radial Pie Menus (${radials.length})</div>
           ${radialsHtml}
         </div>
       </div>
 
-      <!-- Bottom: All Harvested Functions for this App -->
+      <!-- Bottom: All Harvested Functions for this Preset -->
       <div>
         <div style="font-size:11px; font-weight:700; color:var(--text-muted); margin-bottom:8px; text-transform:uppercase;">
-          All Harvested Functions (${(app.actions || []).length}) — Click "➕ To Key" to assign a single function
+          All Preset Functions (${(actions || []).length}) — Click "➕ To Key" to assign
         </div>
         <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(290px, 1fr)); gap:8px;">
-          ${allActionsHtml || '<div style="font-size:11px; color:var(--text-muted);">Uses standard universal shortcuts (Undo, Redo, Save, Copy, Paste, Fit View, Find, Escape).</div>'}
+          ${allActionsHtml || '<div style="font-size:11px; color:var(--text-muted);">Standard universal shortcuts (Undo, Redo, Save, Copy, Paste, Fit View, Find, Escape).</div>'}
         </div>
       </div>
     `;
 
-    // Render 24x24 1-bit icons on preview canvases
+    // Render 24x24 icons
     recCells.forEach((c, idx) => {
       const cvs = document.getElementById(`tdx-prev-ico-${idx}`);
       const icoObj = iconsLibrary[c.icon];
@@ -2468,7 +2598,7 @@ STUDIO_HTML_CONTENT = r"""<!DOCTYPE html>
         drawIconHexOnCanvas(cvs, icoObj.hex, '#111513', null);
       }
     });
-    (app.actions || []).forEach((a, aIdx) => {
+    (actions || []).forEach((a, aIdx) => {
       const cvs = document.getElementById(`tdx-act-ico-${aIdx}`);
       const icoObj = iconsLibrary[a.icon];
       if (cvs && icoObj && icoObj.hex) {
@@ -2479,8 +2609,14 @@ STUDIO_HTML_CONTENT = r"""<!DOCTYPE html>
 
   function assignTdxActionToCurrentKey(actIdx) {
     const app = tdxCatalogApps.find(a => a.id === selectedTdxAppId);
-    if (!app || !app.actions || !app.actions[actIdx]) return;
-    const actObj = app.actions[actIdx];
+    if (!app) return;
+    const presets = app.presets || [];
+    let currentSource = selectedDetailPresetSource || app.selected_preset_source || (presets[0] ? presets[0].source : app.source) || '3Dconnexion';
+    let matchedPreset = presets.find(p => p.source === currentSource) || presets[0] || null;
+    const actions = (matchedPreset && matchedPreset.actions) ? matchedPreset.actions : (app.actions || []);
+    if (!actions[actIdx]) return;
+    const actObj = actions[actIdx];
+
     const targetIdx = selectedControl.type === 'cell' ? selectedControl.index : 1;
     selectedControl = { type: 'cell', index: targetIdx };
     const cell = layersStore[selectedLayerId]?.cells?.[targetIdx - 1];
@@ -2495,6 +2631,8 @@ STUDIO_HTML_CONTENT = r"""<!DOCTYPE html>
   async function importSelectedTdxApp() {
     const app = tdxCatalogApps.find(a => a.id === selectedTdxAppId);
     if (!app) return;
+    const presets = app.presets || [];
+    let currentSource = selectedDetailPresetSource || app.selected_preset_source || (presets[0] ? presets[0].source : app.source) || '3Dconnexion';
     const targetLayer = Number(document.getElementById('tdx-target-layer')?.value || selectedLayerId || 15);
     const includeRadials = !!document.getElementById('tdx-chk-radials')?.checked;
     const addAutoRule = !!document.getElementById('tdx-chk-autorule')?.checked;
@@ -2505,6 +2643,7 @@ STUDIO_HTML_CONTENT = r"""<!DOCTYPE html>
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         app_id: app.id,
+        preset_source: currentSource,
         target_layer: targetLayer,
         include_radials: includeRadials,
         add_auto_rule: addAutoRule,

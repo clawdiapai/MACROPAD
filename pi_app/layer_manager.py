@@ -414,6 +414,7 @@ class LayerManager:
             "3": "ALT",
             "4": "ORBIT_CLUTCH"
         }
+        self.selected_app_presets: Dict[str, str] = {}
         self.load()
 
     def load(self):
@@ -450,6 +451,7 @@ class LayerManager:
                     self.fallback_layer = int(data.get("fallback_layer", 1))
                     if "top_modifiers" in data and isinstance(data["top_modifiers"], dict):
                         self.top_modifiers.update(data["top_modifiers"])
+                    self.selected_app_presets = data.get("selected_app_presets", {})
                     if updated:
                         self.save()
                     return
@@ -457,6 +459,7 @@ class LayerManager:
                 print(f"[LayerManager] Error loading store: {e}. Falling back to defaults.")
         self.layers = dict(DEFAULT_LAYERS)
         self.app_rules = _normalize_rules(list(DEFAULT_APP_RULES))
+        self.selected_app_presets = {}
         self.save()
 
     def save(self):
@@ -473,7 +476,8 @@ class LayerManager:
                 "auto_app_mode": self.auto_app_mode,
                 "untracked_behavior": self.untracked_behavior,
                 "fallback_layer": self.fallback_layer,
-                "top_modifiers": self.top_modifiers
+                "top_modifiers": self.top_modifiers,
+                "selected_app_presets": self.selected_app_presets
             }
             tmp_path = self.store_path + ".tmp"
             with open(tmp_path, "w", encoding="utf-8") as f:
@@ -515,7 +519,8 @@ class LayerManager:
             "fallback_layer": self.fallback_layer,
             "top_modifiers": self.top_modifiers,
             "rules": self.app_rules,
-            "app_rules": self.app_rules
+            "app_rules": self.app_rules,
+            "selected_app_presets": self.selected_app_presets
         }
 
     def save_app_rules_config(self, cfg: Dict[str, Any]):
@@ -531,6 +536,15 @@ class LayerManager:
             self.app_rules = _normalize_rules(cfg["rules"])
         elif "app_rules" in cfg and isinstance(cfg["app_rules"], list):
             self.app_rules = _normalize_rules(cfg["app_rules"])
+        if "selected_app_presets" in cfg and isinstance(cfg["selected_app_presets"], dict):
+            self.selected_app_presets.update(cfg["selected_app_presets"])
+        self.save()
+
+    def get_selected_preset_for_app(self, app_id: str) -> str:
+        return self.selected_app_presets.get(app_id, "")
+
+    def set_selected_preset_for_app(self, app_id: str, preset_source: str):
+        self.selected_app_presets[app_id] = preset_source
         self.save()
 
     def match_app_rule(self, exe_name: str, win_title: str = "") -> Optional[Dict[str, Any]]:

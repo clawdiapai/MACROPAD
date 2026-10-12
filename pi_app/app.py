@@ -1055,16 +1055,37 @@ def _get_tdx_catalog() -> Dict[str, Any]:
                 _tdx_catalog_cache = {"stats": {}, "apps": [], "error": str(e)}
         else:
             _tdx_catalog_cache = {"stats": {}, "apps": []}
+    # Dynamic per-user selected preset overlay
+    sel_map = getattr(layer_manager, "selected_app_presets", {}) or {}
+    for a in _tdx_catalog_cache.get("apps", []):
+        aid = a.get("id")
+        if aid in sel_map:
+            a["selected_preset_source"] = sel_map[aid]
     return _tdx_catalog_cache
 
 @app.get("/api/tdx/catalog")
 async def get_tdx_catalog():
-    """Returns the harvested 3Dconnexion application library (260+ apps, actions, radial menus)."""
+    """Returns the harvested multi-source application library (312 apps, 390+ presets)."""
     return _get_tdx_catalog()
+
+@app.post("/api/tdx/select_preset")
+async def select_tdx_preset(req: Dict[str, Any]):
+    """Selects the active preset source for an application (3Dconnexion, Loupedeck, TourBox, Wacom, PowerUser)."""
+    app_id = (req.get("app_id") or "").strip().lower()
+    source = req.get("source") or req.get("preset_source") or "3Dconnexion"
+    if not app_id:
+        raise HTTPException(status_code=400, detail="app_id is required")
+    layer_manager.set_selected_preset_for_app(app_id, source)
+    mqtt_client.publish("macropad/config_sync", json.dumps({
+        "action": "reload_config",
+        "selected_app_presets": layer_manager.selected_app_presets
+    }))
+    add_log_entry("SYSTEM", "PRESET", f"Set default preset for '{app_id}' -> {source}")
+    return {"status": "ok", "app_id": app_id, "selected_preset": source, "presets": layer_manager.selected_app_presets}
 
 @app.post("/api/tdx/import_layer")
 async def import_tdx_app_layer(req: Dict[str, Any]):
-    """1-click imports a harvested 3Dconnexion app profile into a target MacroPad layer (1..16),
+    """1-click imports a harvested app profile into a target MacroPad layer (1..16),
     including 3x3 grid cells, 24x24 E-Ink icons, hold Radial Pie Menus, and Auto-App Switcher rule."""
     app_id = (req.get("app_id") or "").strip().lower()
     target_layer = int(req.get("target_layer") or 15)
@@ -1075,11 +1096,26 @@ async def import_tdx_app_layer(req: Dict[str, Any]):
     cat = _get_tdx_catalog()
     app_entry = next((a for a in cat.get("apps", []) if a.get("id") == app_id), None)
     if not app_entry:
-        raise HTTPException(status_code=404, detail=f"3Dconnexion app profile '{app_id}' not found")
+        raise HTTPException(status_code=404, detail=f"App profile '{app_id}' not found")
+
+    # Select preset source (defaults to active preset source for this app)
+    preset_source = req.get("preset_source") or layer_manager.get_selected_preset_for_app(app_id) or app_entry.get("selected_preset_source", "3Dconnexion")
+    matched_preset = next((p for p in app_entry.get("presets", []) if p.get("source") == preset_source), None)
 
     custom_cells = req.get("cells")
-    base_cells = custom_cells if (isinstance(custom_cells, list) and len(custom_cells) == 9) else app_entry.get("recommended_cells", [])
-    radial_menus = app_entry.get("radial_menus", []) if include_radials else []
+    if custom_cells and isinstance(custom_cells, list) and len(custom_cells) == 9:
+        base_cells = custom_cells
+    elif matched_preset and matched_preset.get("recommended_cells"):
+        base_cells = matched_preset.get("recommended_cells")
+    else:
+        base_cells = app_entry.get("recommended_cells", [])
+
+    if matched_preset and include_radials:
+        radial_menus = matched_preset.get("radial_menus", [])
+    elif include_radials:
+        radial_menus = app_entry.get("radial_menus", [])
+    else:
+        radial_menus = []
 
     built_cells = []
     for i in range(9):

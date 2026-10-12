@@ -1,6 +1,6 @@
 # 🧩 MacroPad Comprehensive Application Integrations Catalog
 
-This document provides the complete reference of all **native API bridges**, **multi-layer static application profiles**, and **260 harvested 3Dconnexion (`3DxWare`) application profiles** built into the MacroPad ecosystem.
+This document provides the complete reference of all **native API bridges**, **multi-layer static application profiles**, and **312 multi-source peripheral driver presets** (3Dconnexion, Loupedeck, TourBox, Wacom, PowerUser) built into the MacroPad ecosystem.
 
 ---
 
@@ -8,12 +8,29 @@ This document provides the complete reference of all **native API bridges**, **m
 
 | Metric | Count | Description |
 | :--- | :---: | :--- |
-| **Total Application Profiles** | **260** | Pre-configured application definitions harvested from 3Dconnexion `3DxWinCore/Cfg/*.xml` + native MacroPad rules |
-| **Action-Rich App Profiles** | **188** | Profiles containing decoded keyboard macros, multi-step sequences, or native CAD commands |
-| **Executable Actions & Macros** | **2,810** | Ready-to-use `hotkey:...`, `keyseq:...`, and `cad_cmd:...` actions available in the Unified Studio |
+| **Total Application Profiles** | **312** | Pre-configured application definitions across CAD, Creative Suite, Coding, Streaming & Productivity |
+| **Hardware Driver Presets** | **398** | Hardware profiles harvested across 3Dconnexion, Loupedeck, TourBox, Wacom & PowerUser |
+| **Multi-Source Preset Apps** | **70** | Applications with selectable presets (e.g. choose between 3Dx, Loupedeck, TourBox, Wacom, or PowerUser) |
+| **Executable Actions & Macros** | **2,810** | Ready-to-use `hotkey:...`, `keyseq:...`, and `cad_cmd:...` actions available in Unified Studio |
 | **On-Screen Radial Pie Menus** | **427** | 4-slice and 8-slice long-press radial pie menus (`radial_menu.py`) |
-| **24×24 1-Bit E-Ink Icons** | **3560** | Dithered monochrome hardware icons compiled into `icon_library.py` |
+| **24×24 1-Bit E-Ink Icons** | **3,560** | Dithered monochrome hardware icons compiled into `icon_library.py` |
 | **Dedicated Static Hardware Layers** | **16** | 4 Banks × 4 Slots (`Layer 1` – `Layer 16`) stored in `layers_store.json` |
+
+---
+
+## 🔀 Multi-Source Hardware Presets & Source Selector
+
+MacroPad unifies driver presets from **5 different hardware ecosystems**:
+1. **🧊 3Dconnexion (`3DxWare`)**: Precision CAD/CAM, 3D DCC, and 3D printing slicer navigation and command macros.
+2. **🎛️ Loupedeck (v5.9)**: Video editing, timeline cutting, color grading, photo retouching, and audio live-mixing macros.
+3. **🎮 TourBox Console (v5.11)**: Digital illustration, raster manipulation, and RAW darkroom hotkey mappings.
+4. **✒️ Wacom Tablet Driver (v6.4)**: Keystroke gestures, stylus buttons, and canvas navigation mappings.
+5. **⚡ MacroPad Power-User Curated**: 50 high-impact productivity, development, gaming, and engineering integrations.
+
+For applications supported across multiple drivers (e.g. **Blender**, **Adobe Photoshop**, **Adobe Lightroom**, **Adobe Premiere Pro**, **Adobe After Effects**, **Adobe Illustrator**, **Capture One**, **Ableton Live**, **SolidWorks**, **Fusion 360**), presets are grouped under a single canonical identity. In the **Unified Web Studio (`http://192.168.1.62:5000/`)**, you can:
+- 🔄 **Switch Preset Tabs**: Instant live preview of the 3×3 E-Ink button grid, radial pie menus, and hotkeys for each hardware source.
+- ⭐ **Set Active Preset**: Choose which driver source acts as the default auto-loaded layout in Auto-App Mode.
+- 🚀 **1-Click Import**: Deploy any specific preset source onto one of the 16 static hardware layers.
 
 ---
 
@@ -279,78 +296,130 @@ These 73 profiles from the 3Dconnexion library provide executable detection and 
 
 | # | Application Name | Matched Executables | Profile ID |
 | :-: | :--- | :--- | :--- |
-| 1 | **3DViewStation** | `3dviewstation.exe` | `3dviewstation` |
-| 2 | **3DxUnity3D PlayMode** | `unity.exe` | `3dxunity3d_pm` |
-| 3 | **3Shape 3D Viewer** | `3shape_3dviewer.exe` | `3shape_3d_viewer` |
-| 4 | **3Shape DentalDesigner** | `dentaldesigner.exe` | `3shape_dentaldesigner` |
-| 5 | **3Shape ModelBuilder** | `modelbuilder.exe` | `3shape_modelbuilder` |
-| 6 | **3Shape ScanItLibrary** | `scanitlibrary.exe` | `3shape_scanitlibrary` |
-| 7 | **AC3D** | `ac3d.exe` | `ac3d` |
-| 8 | **Alibre Design** | `alibre design.exe` | `alibre_design_v2` |
-| 9 | **Altair EDEM** | `edem.exe` | `altair_edem` |
-| 10 | **Ansys Discovery** | `discovery.exe` | `ansys_discovery` |
-| 11 | **ApplianceDesigner** | `appliancedesigner.exe` | `appliancedesigner` |
-| 12 | **Arc** | `arc.exe` | `arcbrowser` |
-| 13 | **ArcGIS Pro** | `arcgispro.exe` | `arcgis_pro` |
-| 14 | **Autodesk Netfabb** | `netfabb.exe` | `autodesk_netfabb` |
-| 15 | **Avogadro2** | `avogadro2.exe` | `avogadro2` |
-| 16 | **Calculator** | `calculator.exe`, `calculatorapp.exe` | `mscalc` |
-| 17 | **Chicken** | `chicken.exe` | `chicken` |
-| 18 | **Civil 3D** | `acad.exe` | `autocad_civil_3d` |
-| 19 | **CloudCompare** | `cloudcompare.exe` | `cloudcompare` |
-| 20 | **coDiagnostiX** | `codiagnostix.exe` | `straumann_codiagnostix` |
-| 21 | **Cognition Master Professional Suite** | `cognitionmasterprofessionalsuite.exe` | `vmscope_cmps` |
-| 22 | **DesignSpark Mechanical Creator** | `spaceclaim.exe` | `designspark_mechanical_creator` |
-| 23 | **DesignSpark Mechanical Engineer** | `spaceclaim.exe` | `designspark_mechanical_engineer` |
-| 24 | **DesignSpark Mechanical Explorer** | `spaceclaim.exe` | `designspark_mechanical_explorer` |
-| 25 | **DezignWorks for SOLIDWORKS** | `sldworks.exe` | `dezignworks` |
-| 26 | **EarMouldDesigner** | `earmoulddesigner.exe` | `earmoulddesigner` |
-| 27 | **Enscape 3D Client** | `enscapeclient.exe`, `enscapeclientglfw.exe`, `enscape.hostlauncher.exe` | `enscape_3d` |
-| 28 | **EPLAN Pro Panel** | `eplan.exe` | `eplan_pro_panel` |
-| 29 | **EXModel** | `quicksurface.exe` | `exmodel` |
-| 30 | **fe.screen-sim Client Simulation** | `fe.screen-sim client.exe` | `fe_screen_sim_client_simulation` |
-| 31 | **FlexSim** | `flexsim.exe` | `flexsim` |
-| 32 | **FreeCAD** | `freecad.exe` | `freecad` |
-| 33 | **GrabCAD Print** | `3dxnlserver.exe` | `grabcad_print` |
-| 34 | **hyperCAD-S** | `hmc.exe` | `hypercad` |
-| 35 | **HyperWorks** | `hw_.exe` | `hyperworks` |
-| 36 | **iCAD SX** | `icadx4j.exe` | `icad_sx` |
-| 37 | **Jet Demo** | `jet.exe` | `jet` |
-| 38 | **KeyShot** | `keyshot.exe` | `keyshot` |
-| 39 | **Magics** | `magics.exe` | `materialise_magics` |
-| 40 | **MEDIT Link** | `medit_link.exe` | `medit_link` |
-| 41 | **MoI** | `moi.exe` | `moi` |
-| 42 | **OneCNC** | `onecnc_x64.exe` | `onecnc` |
-| 43 | **OnyxCeph³** | `onyxceph.exe`, `onyxview.exe`, `onyxreport.exe` | `onyxceph` |
-| 44 | **OrthoAnalyzer** | `orthoanalyzer.exe` | `orthoanalyzer` |
-| 45 | **Palette CAD** | `plan3d.exe` | `palette_cad` |
-| 46 | **ParaView** | `paraview.exe` | `paraview` |
-| 47 | **Photos** | `photos.exe` | `msphotos` |
-| 48 | **PowerToys Settings** | `powertoys.settings.exe` | `mspowertoys` |
-| 49 | **QUICKSURFACE** | `quicksurface.exe` | `quicksurface` |
-| 50 | **Revu** | `revu.exe` | `bluebeam_revu` |
-| 51 | **ROBOGUIDE** | `roboguidecore.exe` | `roboguide` |
-| 52 | **Secret Ear Builder** | `sebuilder.exe` | `sebuilder` |
-| 53 | **Secret Ear Designer** | `sedesigner.exe` | `sedesigner` |
-| 54 | **Secret Ear Viewer** | `seviewer.exe` | `seviewer` |
-| 55 | **SmartCAM Production Turning** | `pturn.exe` | `smartcam_pturn` |
-| 56 | **SolidCAM** | `solidcam.exe` | `solidcam_machinesimulation` |
-| 57 | **SpaceClaim** | `spaceclaim.exe` | `spaceclaim` |
-| 58 | **SpinFire** | `spinfire.viewer.exe` | `spinfire` |
-| 59 | **STRAKON Cube** | `plan-x64.exe` | `strakon_cube` |
-| 60 | **Straumann Nova** | `javaw.exe` | `straumann_nova` |
-| 61 | **TopSolid Pdm Explorer** | `topsolid.pdm.explorer.exe` | `topsolidpdmexplorer` |
-| 62 | **TopSolid Viewer** | `topsolid.viewer.exe` | `topsolidviewer` |
-| 63 | **Trimble Business Center** | `trimblebusinesscenter.exe` | `trimblebusinesscenter` |
-| 64 | **TrueMap** | `truemap[0-9]+.exe` | `truemap` |
-| 65 | **TurboCAD** | `tcw[1-9]+.exe` | `turbocad` |
-| 66 | **Vectorworks Viewer** | `vectorworks[0-9]*viewer.exe` | `vectorworksviewer` |
-| 67 | **Visi** | `visi.exe` | `visi` |
-| 68 | **VISI Qt** | `visiqt.exe` | `visiqt` |
-| 69 | **Windows Photo Viewer** | `dllhost.exe` | `windowsphotoviewer` |
-| 70 | **WinRAR** | `winrar.exe` | `winrar` |
-| 71 | **ZEISS CALYPSO** | `acis35.exe` | `zeiss_calypso` |
-| 72 | **ZEISS INSPECT** | `zeiss_inspect.exe` | `zeiss_inspect` |
+| 1 | **1Password / Bitwarden** | `1password.exe`, `bitwarden.exe` | `bitwarden` |
+| 2 | **3DViewStation** | `3dviewstation.exe` | `3dviewstation` |
+| 3 | **3DxUnity3D PlayMode** | `unity.exe` | `3dxunity3d_pm` |
+| 4 | **3Shape 3D Viewer** | `3shape_3dviewer.exe` | `3shape_3d_viewer` |
+| 5 | **3Shape DentalDesigner** | `dentaldesigner.exe` | `3shape_dentaldesigner` |
+| 6 | **3Shape ModelBuilder** | `modelbuilder.exe` | `3shape_modelbuilder` |
+| 7 | **3Shape ScanItLibrary** | `scanitlibrary.exe` | `3shape_scanitlibrary` |
+| 8 | **Ableton Live** | `ableton live.exe`, `abltonlive.exe` | `ableton_live` |
+| 9 | **AC3D** | `ac3d.exe` | `ac3d` |
+| 10 | **Adobe After Effects** | `afterfx.exe` | `adobe_after_effects` |
+| 11 | **Adobe Bridge** | `bridge.exe` | `adobe_bridge` |
+| 12 | **Adobe Illustrator** | `illustrator.exe` | `adobe_illustrator` |
+| 13 | **Adobe InDesign** | `indesign.exe` | `adobe_indesign` |
+| 14 | **Adobe Lightroom Classic** | `lightroom.exe` | `adobe_lightroom` |
+| 15 | **Adobe Premiere Pro** | `premiereproc.exe` | `adobe_premiere_pro` |
+| 16 | **Affinity Designer** | `designer.exe`, `affinity designer.exe` | `affinity_designer` |
+| 17 | **Affinity Photo** | `photo.exe`, `affinity photo.exe` | `affinity_photo` |
+| 18 | **Alibre Design** | `alibre design.exe` | `alibre_design_v2` |
+| 19 | **Altair EDEM** | `edem.exe` | `altair_edem` |
+| 20 | **Anki** | `anki.exe` | `anki` |
+| 21 | **Ansys Discovery** | `discovery.exe` | `ansys_discovery` |
+| 22 | **ApplianceDesigner** | `appliancedesigner.exe` | `appliancedesigner` |
+| 23 | **Arc** | `arc.exe` | `arcbrowser` |
+| 24 | **ArcGIS Pro** | `arcgispro.exe` | `arcgis_pro` |
+| 25 | **Arduino IDE** | `arduino_debug.exe`, `arduino.exe` | `arduino_ide` |
+| 26 | **Audacity** | `audacity.exe` | `audacity` |
+| 27 | **Autodesk Alias** | `alias.exe` | `alias` |
+| 28 | **Autodesk Netfabb** | `netfabb.exe` | `autodesk_netfabb` |
+| 29 | **Avogadro2** | `avogadro2.exe` | `avogadro2` |
+| 30 | **Calculator** | `calculator.exe`, `calculatorapp.exe` | `mscalc` |
+| 31 | **Canva** | `canva.exe` | `canva` |
+| 32 | **CapCut** | `capcut.exe` | `capcut` |
+| 33 | **Capture One** | `captureone.exe` | `capture_one` |
+| 34 | **Chicken** | `chicken.exe` | `chicken` |
+| 35 | **Civil 3D** | `acad.exe` | `autocad_civil_3d` |
+| 36 | **Clip Studio Paint** | `clipstudiopaint.exe` | `clip_studio_paint` |
+| 37 | **CloudCompare** | `cloudcompare.exe` | `cloudcompare` |
+| 38 | **coDiagnostiX** | `codiagnostix.exe` | `straumann_codiagnostix` |
+| 39 | **Cognition Master Professional Suite** | `cognitionmasterprofessionalsuite.exe` | `vmscope_cmps` |
+| 40 | **DaVinci Resolve** | `resolve.exe` | `davinci_resolve` |
+| 41 | **DBeaver** | `dbeaver.exe` | `dbeaver` |
+| 42 | **DesignSpark Mechanical Creator** | `spaceclaim.exe` | `designspark_mechanical_creator` |
+| 43 | **DesignSpark Mechanical Engineer** | `spaceclaim.exe` | `designspark_mechanical_engineer` |
+| 44 | **DesignSpark Mechanical Explorer** | `spaceclaim.exe` | `designspark_mechanical_explorer` |
+| 45 | **DezignWorks for SOLIDWORKS** | `sldworks.exe` | `dezignworks` |
+| 46 | **Docker Desktop** | `docker desktop.exe`, `dockerdesktop.exe` | `docker_desktop` |
+| 47 | **EarMouldDesigner** | `earmoulddesigner.exe` | `earmoulddesigner` |
+| 48 | **Enscape 3D Client** | `enscapeclient.exe`, `enscapeclientglfw.exe`, `enscape.hostlauncher.exe` | `enscape_3d` |
+| 49 | **EPLAN Pro Panel** | `eplan.exe` | `eplan_pro_panel` |
+| 50 | **EXModel** | `quicksurface.exe` | `exmodel` |
+| 51 | **fe.screen-sim Client Simulation** | `fe.screen-sim client.exe` | `fe_screen_sim_client_simulation` |
+| 52 | **Figma** | `figma.exe` | `figma` |
+| 53 | **FlexSim** | `flexsim.exe` | `flexsim` |
+| 54 | **FreeCAD** | `freecad.exe` | `freecad` |
+| 55 | **GitHub Desktop** | `githubdesktop.exe`, `github desktop.exe` | `github_desktop` |
+| 56 | **GrabCAD Print** | `3dxnlserver.exe` | `grabcad_print` |
+| 57 | **HandBrake** | `handbrake.exe` | `handbrake` |
+| 58 | **HWiNFO / Afterburner** | `hwinfo64.exe`, `msiafterburner.exe` | `hwinfo_afterburner` |
+| 59 | **hyperCAD-S** | `hmc.exe` | `hypercad` |
+| 60 | **HyperWorks** | `hw_.exe` | `hyperworks` |
+| 61 | **iCAD SX** | `icadx4j.exe` | `icad_sx` |
+| 62 | **Inkscape** | `inkscape.exe` | `inkscape` |
+| 63 | **Jet Demo** | `jet.exe` | `jet` |
+| 64 | **JetBrains IDE (IDEA / PyCharm)** | `idea64.exe`, `pycharm64.exe` | `jetbrains_idea` |
+| 65 | **KeyShot** | `keyshot.exe` | `keyshot` |
+| 66 | **Krita** | `krita.exe` | `krita` |
+| 67 | **LightBurn** | `lightburn.exe` | `lightburn` |
+| 68 | **LTspice / EDA Tools** | `ltspice.exe`, `ltspicexvii.exe` | `ltspice` |
+| 69 | **Lychee Slicer** | `lychee slicer.exe`, `lychee.exe` | `lychee_slicer` |
+| 70 | **Magics** | `magics.exe` | `materialise_magics` |
+| 71 | **MEDIT Link** | `medit_link.exe` | `medit_link` |
+| 72 | **MoI** | `moi.exe` | `moi` |
+| 73 | **Notion** | `notion.exe` | `notion` |
+| 74 | **NVIDIA GeForce Overlay** | `nvcontainer.exe`, `nvgexui.exe` | `nvidia_overlay` |
+| 75 | **OBS Studio** | `obs64.exe`, `obs.exe` | `obs_studio` |
+| 76 | **Obsidian** | `obsidian.exe` | `obsidian` |
+| 77 | **OneCNC** | `onecnc_x64.exe` | `onecnc` |
+| 78 | **OnyxCeph³** | `onyxceph.exe`, `onyxview.exe`, `onyxreport.exe` | `onyxceph` |
+| 79 | **OpenSCAD** | `openscad.exe` | `openscad` |
+| 80 | **OrthoAnalyzer** | `orthoanalyzer.exe` | `orthoanalyzer` |
+| 81 | **Paint Tool SAI** | `sai.exe` | `paint_tool_sai` |
+| 82 | **Palette CAD** | `plan3d.exe` | `palette_cad` |
+| 83 | **ParaView** | `paraview.exe` | `paraview` |
+| 84 | **Parsec / AnyDesk** | `parsecd.exe`, `anydesk.exe` | `parsec` |
+| 85 | **Photos** | `photos.exe` | `msphotos` |
+| 86 | **Postman** | `postman.exe` | `postman` |
+| 87 | **PowerToys / ShareX** | `powertoys.exe`, `sharex.exe` | `powertoys` |
+| 88 | **PowerToys Settings** | `powertoys.settings.exe` | `mspowertoys` |
+| 89 | **PuTTY / WinSCP** | `putty.exe`, `winscp.exe` | `puTTY` |
+| 90 | **QUICKSURFACE** | `quicksurface.exe` | `quicksurface` |
+| 91 | **Reaper** | `reaper.exe` | `reaper` |
+| 92 | **Revu** | `revu.exe` | `bluebeam_revu` |
+| 93 | **ROBOGUIDE** | `roboguidecore.exe` | `roboguide` |
+| 94 | **Secret Ear Builder** | `sebuilder.exe` | `sebuilder` |
+| 95 | **Secret Ear Designer** | `sedesigner.exe` | `sedesigner` |
+| 96 | **Secret Ear Viewer** | `seviewer.exe` | `seviewer` |
+| 97 | **Sketchbook** | `sketchbook.exe` | `sketchbook` |
+| 98 | **Slack** | `slack.exe` | `slack` |
+| 99 | **SmartCAM Production Turning** | `pturn.exe` | `smartcam_pturn` |
+| 100 | **SolidCAM** | `solidcam.exe` | `solidcam_machinesimulation` |
+| 101 | **SpaceClaim** | `spaceclaim.exe` | `spaceclaim` |
+| 102 | **SpinFire** | `spinfire.viewer.exe` | `spinfire` |
+| 103 | **Spotify** | `spotify.exe` | `spotify` |
+| 104 | **Steam** | `steam.exe` | `steam` |
+| 105 | **STRAKON Cube** | `plan-x64.exe` | `strakon_cube` |
+| 106 | **Straumann Nova** | `javaw.exe` | `straumann_nova` |
+| 107 | **Telegram / WhatsApp** | `telegram.exe`, `whatsapp.exe` | `telegram_whatsapp` |
+| 108 | **TopSolid Pdm Explorer** | `topsolid.pdm.explorer.exe` | `topsolidpdmexplorer` |
+| 109 | **TopSolid Viewer** | `topsolid.viewer.exe` | `topsolidviewer` |
+| 110 | **Trimble Business Center** | `trimblebusinesscenter.exe` | `trimblebusinesscenter` |
+| 111 | **TrueMap** | `truemap[0-9]+.exe` | `truemap` |
+| 112 | **TurboCAD** | `tcw[1-9]+.exe` | `turbocad` |
+| 113 | **Vectorworks Viewer** | `vectorworks[0-9]*viewer.exe` | `vectorworksviewer` |
+| 114 | **Visi** | `visi.exe` | `visi` |
+| 115 | **VISI Qt** | `visiqt.exe` | `visiqt` |
+| 116 | **Visual Studio** | `devenv.exe` | `visual_studio` |
+| 117 | **VLC Media Player** | `vlc.exe` | `vlc` |
+| 118 | **VS Code / Cursor** | `code.exe`, `cursor.exe` | `vs_code` |
+| 119 | **Windows (Global)** | *(Inherited)* | `windows_global` |
+| 120 | **Windows Photo Viewer** | `dllhost.exe` | `windowsphotoviewer` |
+| 121 | **Windows Terminal** | `windowsterminal.exe` | `windows_terminal` |
+| 122 | **WinRAR** | `winrar.exe` | `winrar` |
+| 123 | **ZEISS CALYPSO** | `acis35.exe` | `zeiss_calypso` |
+| 124 | **ZEISS INSPECT** | `zeiss_inspect.exe` | `zeiss_inspect` |
 
 ---
 
