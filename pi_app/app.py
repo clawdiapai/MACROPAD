@@ -598,36 +598,30 @@ def on_mqtt_message(client, userdata, msg):
     else:
         add_log_entry("INFO", "MQTT", f"[{topic}] {payload_str}", raw_topic=topic, raw_payload=payload)
 
-# MacroPad Stay-Awake Enforcer
-def ensure_macropad_stay_awake():
+# MacroPad Telemetry Reader (Read-only status sync — NEVER forces stay-awake)
+def sync_macropad_stay_awake_state():
     try:
         import urllib.request
         req = urllib.request.Request("http://192.168.1.58/api/status", headers={"User-Agent": "MacroPadHub"})
         with urllib.request.urlopen(req, timeout=1.5) as resp:
             data = json.loads(resp.read().decode())
             device_state["stay_awake"] = data.get("stay_awake", False)
-            if not data.get("stay_awake", False):
-                toggle_req = urllib.request.Request("http://192.168.1.58/api/toggle_stay_awake", data=b"", headers={"User-Agent": "MacroPadHub"}, method="POST")
-                with urllib.request.urlopen(toggle_req, timeout=1.5) as t_resp:
-                    res_str = t_resp.read().decode()
-                    device_state["stay_awake"] = (res_str == "ON")
-                    add_log_entry("SYSTEM", "POWER", "MacroPad stay-awake mode enforced (Sleep disabled 24/7)")
     except Exception:
         pass
 
 # Background liveness watchdog
 def liveness_watchdog():
-    last_stay_awake_check = 0
+    last_status_check = 0
     while True:
         time.sleep(5)
         now = time.time()
         last = device_state.get("last_seen", 0)
         curr_state = device_state.get("state")
         
-        # Periodically ensure MacroPad stay-awake is active
-        if curr_state == "online" and (now - last_stay_awake_check > 25):
-            last_stay_awake_check = now
-            ensure_macropad_stay_awake()
+        # Read stay_awake state periodically without modifying hardware state
+        if curr_state == "online" and (now - last_status_check > 30):
+            last_status_check = now
+            sync_macropad_stay_awake_state()
 
         # Periodic update for benchmark timer while active
         if benchmark_state["active"]:
