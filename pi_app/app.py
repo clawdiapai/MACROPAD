@@ -111,6 +111,8 @@ log_buffer = collections.deque(maxlen=MAX_LOG_HISTORY)
 device_state: Dict[str, Any] = {
     "connected": False,
     "state": "unknown",         # "online", "sleeping", "offline"
+    "power_state": "battery",   # "battery", "charging", "full", "esp32_usb", "low_battery"
+    "power_desc": "BATTERY POWERED",
     "last_seen": 0,
     "last_seen_str": "Never",
     "vbat": 0.0,
@@ -497,6 +499,10 @@ def on_mqtt_message(client, userdata, msg):
 
         if "batt_pct" in payload:
             device_state["batt_pct"] = int(payload["batt_pct"])
+        if "power_state" in payload:
+            device_state["power_state"] = str(payload["power_state"])
+        if "power_desc" in payload:
+            device_state["power_desc"] = str(payload["power_desc"])
         if "rssi" in payload:
             device_state["rssi"] = int(payload["rssi"])
         if "heap" in payload:
@@ -530,7 +536,8 @@ def on_mqtt_message(client, userdata, msg):
 
         # Persist battery telemetry to SQLite DB
         if "vbat" in payload and float(payload["vbat"]) > 0.5:
-            log_battery_to_db(float(payload["vbat"]), device_state.get("batt_pct", 0), device_state.get("rssi", 0), state)
+            db_state = payload.get("power_state", state)
+            log_battery_to_db(float(payload["vbat"]), device_state.get("batt_pct", 0), device_state.get("rssi", 0), db_state)
 
         if state == "deep_sleeping":
             reason = payload.get("reason", "idle")
@@ -539,7 +546,8 @@ def on_mqtt_message(client, userdata, msg):
             cause = payload.get("cause", "unknown")
             add_log_entry("SYSTEM", "WAKE", f"MacroPad WOKE UP from deep sleep (Wake cause: {cause})", raw_topic=topic, raw_payload=payload)
         else:
-            add_log_entry("SYSTEM", "HEARTBEAT", f"Heartbeat: Vbat={device_state['vbat']:.2f}V ({device_state.get('batt_pct', 0)}%), RSSI={device_state['rssi']}dBm, Heap={device_state['heap']//1024}KB, Layer={device_state['layer']}", raw_topic=topic, raw_payload=payload)
+            p_desc = device_state.get("power_desc", "BATTERY")
+            add_log_entry("SYSTEM", "HEARTBEAT", f"Heartbeat: Vbat={device_state['vbat']:.2f}V ({device_state.get('batt_pct', 0)}% [{p_desc}]), RSSI={device_state['rssi']}dBm, Heap={device_state['heap']//1024}KB, Layer={device_state['layer']}", raw_topic=topic, raw_payload=payload)
 
         broadcast_state()
 
@@ -1628,6 +1636,10 @@ HTML_CONTENT = """<!DOCTYPE html>
       <span class="metric-val amber" id="metric-layer">Bank 1 | L1</span>
     </div>
     <div class="metric-item">
+      <span class="metric-label">Power State</span>
+      <span class="metric-val cyan" id="metric-power-source">🔋 BATTERY</span>
+    </div>
+    <div class="metric-item">
       <span class="metric-label">Battery</span>
       <span class="metric-val green" id="metric-vbat">-- V</span>
     </div>
@@ -2301,6 +2313,29 @@ HTML_CONTENT = """<!DOCTYPE html>
 
     document.getElementById('metric-vbat').textContent = state.vbat > 0 ? `${state.vbat.toFixed(2)} V` : '-- V';
     document.getElementById('metric-pct').textContent = state.batt_pct !== undefined ? `${state.batt_pct} %` : '-- %';
+
+    const pState = state.power_state || 'battery';
+    let pLabel = '🔋 BATTERY';
+    let pClass = 'cyan';
+    if (pState === 'charging') {
+      pLabel = '⚡ IN CHARGE';
+      pClass = 'amber';
+    } else if (pState === 'full') {
+      pLabel = '✅ CHARGED';
+      pClass = 'green';
+    } else if (pState === 'esp32_usb') {
+      pLabel = '🔌 ESP32 USB';
+      pClass = 'purple';
+    } else if (pState === 'low_battery') {
+      pLabel = '⚠️ LOW BATT';
+      pClass = 'red';
+    }
+    const pSrcEl = document.getElementById('metric-power-source');
+    if (pSrcEl) {
+      pSrcEl.textContent = pLabel;
+      pSrcEl.className = `metric-val ${pClass}`;
+    }
+
     document.getElementById('metric-rssi').textContent = state.rssi ? `${state.rssi} dBm` : '-- dBm';
     document.getElementById('metric-layer').textContent = `Bank ${state.bank || 1} | L${state.layer || 1}`;
     document.getElementById('metric-uptime').textContent = state.uptime_str || '0s';

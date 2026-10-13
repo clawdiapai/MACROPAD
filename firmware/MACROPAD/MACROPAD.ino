@@ -18,6 +18,14 @@
 #include "esp_private/brownout.h"
 #include "dashboard_html.h"
 
+enum PowerState {
+  PWR_BATTERY,             // Battery Powered (Discharging)
+  PWR_BATTERY_CHARGING,    // Battery Powered - In Charge (Charging Module active)
+  PWR_BATTERY_FULL,        // Battery Powered - Fully Charged (Float/Trickle)
+  PWR_ESP32_USB,           // ESP32 Powered (Direct 5V USB-C to ESP32 board)
+  PWR_BATTERY_LOW          // Battery Powered - Low Battery Warning (<= 3.40V)
+};
+
 // ==========================================
 // NETWORK CONFIGURATION
 // ==========================================
@@ -116,6 +124,84 @@ const float USB_DETECT_THRESHOLD = 4.3;
 const int BATTERY_CAPACITY_MAH = 4000;
 const int CHARGE_CURRENT_MA = 1000;
 
+PowerState currentPowerState = PWR_BATTERY;
+
+const char* getPowerStateString(PowerState st) {
+  switch (st) {
+    case PWR_ESP32_USB:        return "esp32_usb";
+    case PWR_BATTERY_CHARGING: return "charging";
+    case PWR_BATTERY_FULL:     return "full";
+    case PWR_BATTERY_LOW:      return "low_battery";
+    case PWR_BATTERY:
+    default:                   return "battery";
+  }
+}
+
+const char* getPowerStateDisplayName(PowerState st) {
+  switch (st) {
+    case PWR_ESP32_USB:        return "ESP32 POWERED";
+    case PWR_BATTERY_CHARGING: return "IN CHARGE";
+    case PWR_BATTERY_FULL:     return "FULLY CHARGED";
+    case PWR_BATTERY_LOW:      return "! LOW BATTERY !";
+    case PWR_BATTERY:
+    default:                   return "BATTERY POWERED";
+  }
+}
+
+PowerState evaluatePowerState(float volts) {
+  // 1. ESP32 Direct 5V USB-C:
+  // Feeds 5V VBUS rail directly -> ADC reads ≥ 4.50V (typically 4.8V - 5.25V).
+  // A single-cell LiPo can never physically reach 4.50V.
+  if (volts >= 4.50f) {
+    return PWR_ESP32_USB;
+  }
+
+  // 2. Battery Powered - In Charge:
+  // While actively charging through the charging module (CC/CV phase),
+  // the cell terminal voltage is pushed above resting LiPo ceiling (4.20V),
+  // typically measuring 4.24V - 4.45V (e.g. 4.32V).
+  // We also track positive voltage slope over 45s for lower battery levels.
+  static float lastSlopeV = 0.0f;
+  static unsigned long lastSlopeTime = 0;
+  static bool chargingSlopeActive = false;
+  unsigned long now = millis();
+
+  if (lastSlopeTime == 0 || now - lastSlopeTime >= 45000) {
+    if (lastSlopeTime > 0 && lastSlopeV > 3.0f && lastSlopeV < 4.24f) {
+      float dV = volts - lastSlopeV;
+      if (dV >= 0.020f) {
+        chargingSlopeActive = true;
+      } else if (dV <= -0.015f) {
+        chargingSlopeActive = false;
+      }
+    }
+    lastSlopeV = volts;
+    lastSlopeTime = now;
+  }
+
+  if (volts >= 4.24f && volts < 4.50f) {
+    return PWR_BATTERY_CHARGING;
+  }
+
+  if (chargingSlopeActive && volts >= 3.40f && volts < 4.24f) {
+    return PWR_BATTERY_CHARGING;
+  }
+
+  // 3. Battery Powered - Fully Charged:
+  // When charger terminates current, voltage rests in the 4.18V - 4.23V float band.
+  if (volts >= 4.18f && volts < 4.24f) {
+    return PWR_BATTERY_FULL;
+  }
+
+  // 4. Critical Low Battery Warning (≤ 3.40V):
+  if (volts <= (LOW_BATTERY_THRESHOLD + 0.10f) && volts > 0.5f) {
+    return PWR_BATTERY_LOW;
+  }
+
+  // 5. Normal Battery Discharging
+  return PWR_BATTERY;
+}
+
 struct LipoPoint {
   float v;
   int pct;
@@ -139,15 +225,22 @@ const LipoPoint lipoOcvTable[] = {
 const int LIPO_TABLE_ENTRIES = sizeof(lipoOcvTable) / sizeof(lipoOcvTable[0]);
 
 int getLipoPercentage(float volts) {
-  if (volts >= lipoOcvTable[0].v) return 100;
-  if (volts <= lipoOcvTable[LIPO_TABLE_ENTRIES - 1].v) return 0;
+  if (volts >= 4.50f) return 100; // ESP32 USB Powered
+  // While charging at > 4.20V, terminal voltage is artificially inflated by charge current IR drop (~0.12V)
+  float effectiveV = volts;
+  if (volts >= 4.24f && volts < 4.50f) {
+    effectiveV = volts - 0.12f; // Compensate for IR drop during charging to get true chemical SoC
+    if (effectiveV > 4.18f) effectiveV = 4.18f; // Cap at 95% until charger terminates
+  }
+  if (effectiveV >= lipoOcvTable[0].v) return 100;
+  if (effectiveV <= lipoOcvTable[LIPO_TABLE_ENTRIES - 1].v) return 0;
   for (int i = 0; i < LIPO_TABLE_ENTRIES - 1; i++) {
-    if (volts <= lipoOcvTable[i].v && volts >= lipoOcvTable[i + 1].v) {
+    if (effectiveV <= lipoOcvTable[i].v && effectiveV >= lipoOcvTable[i + 1].v) {
       float vHigh = lipoOcvTable[i].v;
       float vLow = lipoOcvTable[i + 1].v;
       int pHigh = lipoOcvTable[i].pct;
       int pLow = lipoOcvTable[i + 1].pct;
-      float fraction = (volts - vLow) / (vHigh - vLow);
+      float fraction = (effectiveV - vLow) / (vHigh - vLow);
       return pLow + (int)(fraction * (pHigh - pLow));
     }
   }
@@ -687,13 +780,27 @@ void drawHud() {
   display.setTextColor(GxEPD_BLACK);
 
   float volts = readBatteryVoltage();
+  currentPowerState = evaluatePowerState(volts);
   int battPct = getLipoPercentage(volts);
+  if (currentPowerState == PWR_BATTERY_FULL || currentPowerState == PWR_ESP32_USB) {
+    battPct = 100;
+  }
 
   int y = 28;
   // Battery line 1: Voltage and State
   display.setCursor(8, y);
   display.print("POWER : ");
-  display.print(volts, 2); display.print("V ["); display.print(battPct); display.print("%] BATTERY");
+  display.print(volts, 2); 
+  display.print("V [");
+  if (currentPowerState == PWR_ESP32_USB) {
+    display.print("EXT] ");
+  } else if (currentPowerState == PWR_BATTERY_CHARGING) {
+    display.print("CHG] ");
+  } else {
+    display.print(battPct);
+    display.print("%] ");
+  }
+  display.print(getPowerStateDisplayName(currentPowerState));
 
   // Battery bar graph
   y += 10;
@@ -701,13 +808,23 @@ void drawHud() {
   int fillW = (int)(180.0f * (battPct / 100.0f));
   if (fillW > 0) display.fillRect(10, y + 2, fillW, 3, GxEPD_BLACK);
 
-  // Time remaining line
+  // Time remaining / status line
   y += 11;
   display.setCursor(8, y);
-  // Estimating runtime on 4000mAh battery based on measured 115mA active / 10.5mA deep sleep
-  int actHours = (int)(((float)BATTERY_CAPACITY_MAH * (battPct / 100.0f)) / 115.0f);
-  int sleepDays = (int)(((float)BATTERY_CAPACITY_MAH * (battPct / 100.0f)) / (10.5f * 24.0f));
-  display.print("EST.RT: ~"); display.print(actHours); display.print("h act | ~"); display.print(sleepDays); display.print("d sleep");
+  if (currentPowerState == PWR_ESP32_USB) {
+    display.print("STATUS: Direct USB-C (No Battery Drain)");
+  } else if (currentPowerState == PWR_BATTERY_CHARGING) {
+    int minsToFull = calculateTimeToFull(battPct);
+    display.print("CHG.RT: ~"); display.print(minsToFull); display.print("m to 100% [1A CC/CV]");
+  } else if (currentPowerState == PWR_BATTERY_FULL) {
+    display.print("STATUS: Charger Connected (Float/100%)");
+  } else if (currentPowerState == PWR_BATTERY_LOW) {
+    display.print("WARNING: RECHARGE CELL (<1h left)");
+  } else {
+    int actHours = (int)(((float)BATTERY_CAPACITY_MAH * (battPct / 100.0f)) / 115.0f);
+    int sleepDays = (int)(((float)BATTERY_CAPACITY_MAH * (battPct / 100.0f)) / (10.5f * 24.0f));
+    display.print("EST.RT: ~"); display.print(actHours); display.print("h act | ~"); display.print(sleepDays); display.print("d sleep");
+  }
 
   // Network & RSSI
   y += 12;
@@ -946,8 +1063,9 @@ void handlePowerManagement() {
     }
   }
   
-  if (cachedVolts >= USB_DETECT_THRESHOLD) {
-    return; // External USB power: do not sleep
+  currentPowerState = evaluatePowerState(cachedVolts);
+  if (currentPowerState == PWR_ESP32_USB || currentPowerState == PWR_BATTERY_CHARGING || currentPowerState == PWR_BATTERY_FULL) {
+    return; // External power connected (direct USB or charging module): do not sleep
   }
 
   // 1. Critical Low-Battery Safety Cutoff:
@@ -1151,13 +1269,19 @@ const char* getResetReasonString(esp_reset_reason_t reason) {
 void sendHeartbeat() {
   if (!mqttClient.connected()) return;
   float vbat = readBatteryVoltage();
+  currentPowerState = evaluatePowerState(vbat);
   int battPct = getLipoPercentage(vbat);
+  if (currentPowerState == PWR_BATTERY_FULL || currentPowerState == PWR_ESP32_USB) {
+    battPct = 100;
+  }
   int rssi = WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : 0;
   uint32_t freeHeap = ESP.getFreeHeap();
   uint32_t minHeap = ESP.getMinFreeHeap();
   
   String payload = "{\"device\":\"macropad\",\"state\":\"online\",\"vbat\":" + String(vbat, 2) + 
                    ",\"batt_pct\":" + String(battPct) +
+                   ",\"power_state\":\"" + String(getPowerStateString(currentPowerState)) + "\"" +
+                   ",\"power_desc\":\"" + String(getPowerStateDisplayName(currentPowerState)) + "\"" +
                    ",\"rssi\":" + String(rssi) + 
                    ",\"heap\":" + String(freeHeap) + 
                    ",\"min_heap\":" + String(minHeap) + 
@@ -1185,10 +1309,16 @@ void setupWebServer() {
 
   server.on("/api/status", HTTP_GET, []() {
     float vbat = readBatteryVoltage();
+    currentPowerState = evaluatePowerState(vbat);
     int battPct = getLipoPercentage(vbat);
+    if (currentPowerState == PWR_BATTERY_FULL || currentPowerState == PWR_ESP32_USB) {
+      battPct = 100;
+    }
     int rssi = WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : 0;
     String json = "{\"device\":\"macropad\",\"vbat\":" + String(vbat, 2) + 
                   ",\"batt_pct\":" + String(battPct) +
+                  ",\"power_state\":\"" + String(getPowerStateString(currentPowerState)) + "\"" +
+                  ",\"power_desc\":\"" + String(getPowerStateDisplayName(currentPowerState)) + "\"" +
                   ",\"rssi\":" + String(rssi) + 
                   ",\"heap\":" + String(ESP.getFreeHeap()) + 
                   ",\"min_heap\":" + String(ESP.getMinFreeHeap()) + 
