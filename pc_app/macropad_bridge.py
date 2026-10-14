@@ -1045,30 +1045,33 @@ def on_radial_slice_selected(act_type: str, act_val: str, act_label: str, fb_typ
     """Callback invoked when a user selects a slice from the on-screen Radial Menu."""
     logger.info(f">>> [Radial Menu Selected] {act_label} -> {act_type.upper()}: {act_val} (fb={fb_type}:{fb_val})")
     
-    # 0. Ensure target CAD window has restored keyboard input focus
+    # 0. Ensure target CAD window has restored keyboard input focus without un-maximizing
     if target_hwnd:
         try:
-            ctypes.windll.user32.ShowWindow(target_hwnd, 9)  # SW_RESTORE
+            if ctypes.windll.user32.IsIconic(target_hwnd):
+                ctypes.windll.user32.ShowWindow(target_hwnd, 9)  # SW_RESTORE only if minimized
+            else:
+                ctypes.windll.user32.ShowWindow(target_hwnd, 5)  # SW_SHOW preserves maximized / normal state
             ctypes.windll.user32.SetForegroundWindow(target_hwnd)
         except Exception:
             pass
-    time.sleep(0.05)  # 50ms for Windows input queue transition
+    time.sleep(0.06)  # 60ms for Windows input queue transition
 
     # 1. Check if action has a direct native Fusion hotkey (Line, Circle, Extrude, etc.)
     val_l = act_val.lower().strip()
+    if val_l.startswith("hotkey:"):
+        val_l = val_l.split(":", 1)[1].strip()
     if val_l in FUSION_DIRECT_HOTKEYS:
         hk = FUSION_DIRECT_HOTKEYS[val_l]
-        send_esc_cancel()
         time.sleep(0.02)
-        send_vk_tap(ord(hk.upper()), 0.025)
+        send_vk_tap(ord(hk.upper()), 0.03)
         logger.info(f"    [Radial Hotkey] Tapped '{hk}' for {act_val}")
         return
 
     # 2. Check if slice definition specified a direct fkey (e.g. fb_type='fkey', fb_val='C')
     if fb_type == "fkey" and fb_val:
-        send_esc_cancel()
         time.sleep(0.02)
-        send_vk_tap(ord(fb_val.upper()), 0.025)
+        send_vk_tap(ord(fb_val.upper()), 0.03)
         logger.info(f"    [Radial fkey] Tapped '{fb_val}' for {act_val}")
         return
 

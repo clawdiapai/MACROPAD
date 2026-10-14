@@ -54,7 +54,8 @@ class RadialMenuOverlay:
 
     def show_menu(self, title: str, items: List[Dict[str, str]]):
         """Shows the radial menu centered at the current mouse cursor."""
-        self.cmd_queue.put(("show", (title, items)))
+        fg = ctypes.windll.user32.GetForegroundWindow()
+        self.cmd_queue.put(("show", (title, items, fg)))
 
     def release_hold(self):
         """Called when the user releases the held MacroPad key."""
@@ -227,9 +228,9 @@ class RadialMenuOverlay:
         self.canvas.delete("all")
         self.canvas.create_image(0, 0, anchor="nw", image=self._tk_img)
 
-    def _show(self, title: str, items: List[Dict[str, str]]):
+    def _show(self, title: str, items: List[Dict[str, str]], target_hwnd: Optional[int] = None):
         # Capture the currently active CAD window before showing overlay
-        self.target_hwnd = ctypes.windll.user32.GetForegroundWindow()
+        self.target_hwnd = target_hwnd or ctypes.windll.user32.GetForegroundWindow()
         cx, cy = get_cursor_pos()
         self.center_screen_x = cx
         self.center_screen_y = cy
@@ -253,9 +254,13 @@ class RadialMenuOverlay:
             self.is_visible = False
             self.hovered_index = -1
             self.sticky_click_mode = False
-            # Restore focus to the CAD window if needed
+            # Restore focus to the CAD window if needed without altering maximized state
             if self.target_hwnd:
                 try:
+                    if ctypes.windll.user32.IsIconic(self.target_hwnd):
+                        ctypes.windll.user32.ShowWindow(self.target_hwnd, 9)  # SW_RESTORE only if minimized
+                    else:
+                        ctypes.windll.user32.ShowWindow(self.target_hwnd, 5)  # SW_SHOW preserves maximized
                     ctypes.windll.user32.SetForegroundWindow(self.target_hwnd)
                 except Exception:
                     pass
@@ -295,8 +300,11 @@ class RadialMenuOverlay:
             while True:
                 cmd, arg = self.cmd_queue.get_nowait()
                 if cmd == "show":
-                    title, items = arg
-                    self._show(title, items)
+                    if isinstance(arg, tuple) and len(arg) == 3:
+                        title, items, fg = arg
+                    else:
+                        title, items, fg = arg[0], arg[1], None
+                    self._show(title, items, fg)
                 elif cmd == "release":
                     if self.is_visible:
                         if self.hovered_index >= 0:
