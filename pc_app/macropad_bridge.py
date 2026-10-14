@@ -1117,13 +1117,15 @@ def get_radial_menu_for_cell(layer: int, index: int):
             formatted_slices = []
             for s in rm.get("slices", [])[:8]:
                 lbl = s.get("name") or s.get("label") or "Slice"
-                act_s = s.get("action", "")
+                act_s = s.get("action") or s.get("val", "")
                 sub = act_s.split(":", 1)[-1] if ":" in act_s else act_s
                 disp = f"{lbl}\n({sub})" if sub and sub not in lbl else lbl
                 formatted_slices.append({
                     "label": disp,
-                    "type": "action_str",
-                    "val": act_s
+                    "type": s.get("type", "action_str"),
+                    "val": act_s,
+                    "fb_type": s.get("fb_type", ""),
+                    "fb_val": s.get("fb_val", "")
                 })
             if formatted_slices:
                 return title, formatted_slices
@@ -1136,10 +1138,14 @@ def get_radial_menu_for_cell(layer: int, index: int):
             lbl = s.get("label", "Slice")
             sub = s.get("sub", "")
             disp = f"{lbl}\n({sub})" if sub and sub not in lbl else lbl
+            act_v = s.get("val") or s.get("action") or ""
+            act_t = s.get("type") or ("action_str" if ":" in act_v else "fusion")
             formatted_slices.append({
                 "label": disp,
-                "type": "action_str",
-                "val": s.get("action", "")
+                "type": act_t,
+                "val": act_v,
+                "fb_type": s.get("fb_type", ""),
+                "fb_val": s.get("fb_val", "")
             })
         if formatted_slices:
             return title, formatted_slices
@@ -1159,24 +1165,32 @@ def on_radial_slice_selected(act_type: str, act_val: str, act_label: str, fb_typ
         force_foreground_window(cad_hwnd)
     time.sleep(0.12)  # 120ms for Windows / Qt to route keyboard focus
 
-    # 1. Check if action has a direct native Fusion hotkey (Line, Circle, Extrude, etc.)
     val_l = act_val.lower().strip()
     if val_l.startswith("hotkey:"):
         val_l = val_l.split(":", 1)[1].strip()
+
+    # 1. Try native Fusion 360 Add-In Bridge first (<2ms direct API execution)
+    if act_type == "fusion" or val_l in FUSION_DIRECT_HOTKEYS or val_l in FUSION_ADDIN_MAP:
+        addin_target = FUSION_ADDIN_MAP.get(val_l.upper(), ("command", val_l))
+        if send_fusion_addin_command(addin_target[1], action=addin_target[0], cancel_first=True):
+            logger.info(f"    [MacroPadFusionBridge] Executed '{addin_target[1]}' natively via Fusion API")
+            return
+
+    # 2. Check if action has a direct native Fusion hotkey (Line, Circle, Extrude, etc.)
     if val_l in FUSION_DIRECT_HOTKEYS:
         hk = FUSION_DIRECT_HOTKEYS[val_l]
         send_vk_tap(ord(hk.upper()), 0.04)
         logger.info(f"    [Radial Hotkey] Tapped '{hk}' for {act_val}")
         return
 
-    # 2. Check if slice definition specified a direct fkey (e.g. fb_type='fkey', fb_val='C')
+    # 3. Check if slice definition specified a direct fkey (e.g. fb_type='fkey', fb_val='C')
     if fb_type == "fkey" and fb_val:
         send_vk_tap(ord(fb_val.upper()), 0.04)
         logger.info(f"    [Radial fkey] Tapped '{fb_val}' for {act_val}")
         return
 
-    # 3. Action strings (e.g. 'action_str')
-    if act_type == "action_str":
+    # 4. Action strings (e.g. 'action_str', 'fusion:line', 'hotkey:E')
+    if act_type == "action_str" or ":" in act_val:
         execute_action_string(act_val, act_label)
         return
 
