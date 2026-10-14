@@ -270,8 +270,11 @@ def _resolve_uwp_child_exe(hwnd) -> str:
         pass
     return ""
 
+last_foreground_hwnd: int = 0
+
 def get_foreground_window_info():
     """Returns (exe_basename_lower, window_title) of the currently focused Windows application."""
+    global last_foreground_hwnd
     try:
         ensure_default_desktop()
         hwnd = ctypes.windll.user32.GetForegroundWindow()
@@ -302,12 +305,102 @@ def get_foreground_window_info():
                                 exe_name = real_exe
                 finally:
                     ctypes.windll.kernel32.CloseHandle(hproc)
+        if hwnd and exe_name and exe_name not in ("python.exe", "pythonw.exe"):
+            last_foreground_hwnd = hwnd
         return exe_name, title
     except Exception:
         return "", ""
 
+def force_foreground_window(hwnd: int) -> bool:
+    """Forces keyboard input focus to the specified window without altering maximized state."""
+    if not hwnd or not ctypes.windll.user32.IsWindow(hwnd):
+        return False
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+    ensure_default_desktop()
+
+    fore_hwnd = user32.GetForegroundWindow()
+    if fore_hwnd == hwnd:
+        return True
+
+    curr_tid = kernel32.GetCurrentThreadId()
+    target_tid = user32.GetWindowThreadProcessId(hwnd, None)
+    fore_tid = user32.GetWindowThreadProcessId(fore_hwnd, None) if fore_hwnd else 0
+
+    attached_fore = False
+    attached_target = False
+    if fore_tid and fore_tid != curr_tid:
+        attached_fore = bool(user32.AttachThreadInput(curr_tid, fore_tid, True))
+    if target_tid and target_tid != curr_tid:
+        attached_target = bool(user32.AttachThreadInput(curr_tid, target_tid, True))
+
+    try:
+        user32.AllowSetForegroundWindow(0xFFFFFFFF)  # ASFW_ANY
+        if user32.IsIconic(hwnd):
+            user32.ShowWindow(hwnd, 9)  # SW_RESTORE only if minimized
+        else:
+            user32.ShowWindow(hwnd, 5)  # SW_SHOW preserves maximized / normal state
+        user32.BringWindowToTop(hwnd)
+        return bool(user32.SetForegroundWindow(hwnd))
+    except Exception:
+        return False
+    finally:
+        if attached_fore:
+            user32.AttachThreadInput(curr_tid, fore_tid, False)
+        if attached_target:
+            user32.AttachThreadInput(curr_tid, target_tid, False)
+
+def get_active_cad_hwnd(hint_hwnd: Optional[int] = None) -> Optional[int]:
+    """Resolves the true top-level HWND of Autodesk Fusion or the active CAD app."""
+    user32 = ctypes.windll.user32
+    ensure_default_desktop()
+    
+    # 1. Hint if valid CAD window
+    if hint_hwnd and user32.IsWindow(hint_hwnd):
+        length = user32.GetWindowTextLengthW(hint_hwnd)
+        if length > 0:
+            buff = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hint_hwnd, buff, length + 1)
+            txt = buff.value.lower()
+            if any(k in txt for k in ("fusion", "autocad", "inventor", "solidworks")):
+                return hint_hwnd
+
+    # 2. Last known foreground HWND
+    global last_foreground_hwnd
+    if last_foreground_hwnd and user32.IsWindow(last_foreground_hwnd):
+        length = user32.GetWindowTextLengthW(last_foreground_hwnd)
+        if length > 0:
+            buff = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(last_foreground_hwnd, buff, length + 1)
+            txt = buff.value.lower()
+            if any(k in txt for k in ("fusion", "autocad", "inventor", "solidworks")):
+                return last_foreground_hwnd
+
+    # 3. Visible window enumeration fallback
+    found_hwnd = None
+    WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+    def cb(h, lp):
+        nonlocal found_hwnd
+        if user32.IsWindowVisible(h):
+            l = user32.GetWindowTextLengthW(h)
+            if l > 0:
+                b = ctypes.create_unicode_buffer(l + 1)
+                user32.GetWindowTextW(h, b, l + 1)
+                t = b.value.lower()
+                if "autodesk fusion" in t or "autocad" in t:
+                    found_hwnd = h
+                    return False
+        return True
+    try:
+        user32.EnumWindows(WNDENUMPROC(cb), 0)
+    except Exception:
+        pass
+    return found_hwnd or hint_hwnd
+
 def get_foreground_window_title() -> str:
     """Returns the lowercase title of the currently focused Windows application."""
+    _, title = get_foreground_window_info()
+    return title.lower()
     _, title = get_foreground_window_info()
     return title.lower()
 
@@ -555,22 +648,37 @@ def sync_config_from_hub():
 # Direct standard single-key shortcuts in Autodesk Fusion 360 (work in 2D sketch & 3D space)
 FUSION_DIRECT_HOTKEYS = {
     "line": "L",
+    "l": "L",
     "circle_center": "C",
     "circle": "C",
+    "c": "C",
     "rect_2pt": "R",
     "rect": "R",
+    "r": "R",
     "extrude": "E",
+    "e": "E",
     "fillet": "F",
+    "f": "F",
     "dimension": "D",
+    "d": "D",
     "measure": "I",
+    "i": "I",
     "project": "P",
+    "p": "P",
     "construction": "X",
+    "x": "X",
     "offset": "O",
+    "o": "O",
     "joint": "J",
+    "j": "J",
     "move": "M",
+    "m": "M",
     "trim": "T",
+    "t": "T",
     "press_pull": "Q",
+    "q": "Q",
     "hole": "H",
+    "h": "H",
 }
 
 # Native Fusion 360 Add-In target mapping for CAD commands across Layers 5..13
@@ -1045,17 +1153,11 @@ def on_radial_slice_selected(act_type: str, act_val: str, act_label: str, fb_typ
     """Callback invoked when a user selects a slice from the on-screen Radial Menu."""
     logger.info(f">>> [Radial Menu Selected] {act_label} -> {act_type.upper()}: {act_val} (fb={fb_type}:{fb_val})")
     
-    # 0. Ensure target CAD window has restored keyboard input focus without un-maximizing
-    if target_hwnd:
-        try:
-            if ctypes.windll.user32.IsIconic(target_hwnd):
-                ctypes.windll.user32.ShowWindow(target_hwnd, 9)  # SW_RESTORE only if minimized
-            else:
-                ctypes.windll.user32.ShowWindow(target_hwnd, 5)  # SW_SHOW preserves maximized / normal state
-            ctypes.windll.user32.SetForegroundWindow(target_hwnd)
-        except Exception:
-            pass
-    time.sleep(0.06)  # 60ms for Windows input queue transition
+    # 0. Find and force focus to the true CAD window without altering maximized state
+    cad_hwnd = get_active_cad_hwnd(target_hwnd)
+    if cad_hwnd:
+        force_foreground_window(cad_hwnd)
+    time.sleep(0.12)  # 120ms for Windows / Qt to route keyboard focus
 
     # 1. Check if action has a direct native Fusion hotkey (Line, Circle, Extrude, etc.)
     val_l = act_val.lower().strip()
@@ -1063,15 +1165,13 @@ def on_radial_slice_selected(act_type: str, act_val: str, act_label: str, fb_typ
         val_l = val_l.split(":", 1)[1].strip()
     if val_l in FUSION_DIRECT_HOTKEYS:
         hk = FUSION_DIRECT_HOTKEYS[val_l]
-        time.sleep(0.02)
-        send_vk_tap(ord(hk.upper()), 0.03)
+        send_vk_tap(ord(hk.upper()), 0.04)
         logger.info(f"    [Radial Hotkey] Tapped '{hk}' for {act_val}")
         return
 
     # 2. Check if slice definition specified a direct fkey (e.g. fb_type='fkey', fb_val='C')
     if fb_type == "fkey" and fb_val:
-        time.sleep(0.02)
-        send_vk_tap(ord(fb_val.upper()), 0.03)
+        send_vk_tap(ord(fb_val.upper()), 0.04)
         logger.info(f"    [Radial fkey] Tapped '{fb_val}' for {act_val}")
         return
 
@@ -1198,7 +1298,11 @@ APP_PROCESS_MAP = {
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%H:%M:%S"
+    datefmt="%H:%M:%S",
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler(os.path.join(os.path.dirname(__file__), "bridge.log"), mode="a", encoding="utf-8")
+    ]
 )
 logger = logging.getLogger("MacroPadAudioBridge")
 

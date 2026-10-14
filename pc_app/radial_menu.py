@@ -27,6 +27,15 @@ TRANSPARENT_RGB = (1, 2, 3)
 class POINT(ctypes.Structure):
     _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
 
+def ensure_default_desktop():
+    try:
+        hdesk = ctypes.windll.user32.OpenDesktopW("Default", 0, False, 0x01FF)
+        if hdesk:
+            ctypes.windll.user32.SetThreadDesktop(hdesk)
+            ctypes.windll.user32.CloseDesktop(hdesk)
+    except Exception:
+        pass
+
 def get_cursor_pos() -> Tuple[int, int]:
     pt = POINT()
     ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
@@ -54,6 +63,7 @@ class RadialMenuOverlay:
 
     def show_menu(self, title: str, items: List[Dict[str, str]]):
         """Shows the radial menu centered at the current mouse cursor."""
+        ensure_default_desktop()
         fg = ctypes.windll.user32.GetForegroundWindow()
         self.cmd_queue.put(("show", (title, items, fg)))
 
