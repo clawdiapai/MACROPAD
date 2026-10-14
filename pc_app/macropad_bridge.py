@@ -8,7 +8,7 @@ import sys
 import subprocess
 import time
 import webbrowser
-from typing import Optional, List
+from typing import Optional, List, Tuple
 import threading
 
 # Ensure UTF-8 encoding on Windows (especially under pythonw.exe when Discord channel names contain emojis)
@@ -272,23 +272,21 @@ def _resolve_uwp_child_exe(hwnd) -> str:
 
 last_foreground_hwnd: int = 0
 
-def get_foreground_window_info():
-    """Returns (exe_basename_lower, window_title) of the currently focused Windows application."""
-    global last_foreground_hwnd
+def get_window_info(hwnd: int) -> Tuple[str, str]:
+    """Returns (exe_basename_lower, window_title) for any window HWND."""
+    if not hwnd or not ctypes.windll.user32.IsWindow(hwnd):
+        return "", ""
     try:
-        ensure_default_desktop()
-        hwnd = ctypes.windll.user32.GetForegroundWindow()
-        if not hwnd:
-            return "", ""
-        length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
+        user32 = ctypes.windll.user32
+        length = user32.GetWindowTextLengthW(hwnd)
         title = ""
         if length > 0:
             buf = ctypes.create_unicode_buffer(length + 1)
-            ctypes.windll.user32.GetWindowTextW(hwnd, buf, length + 1)
+            user32.GetWindowTextW(hwnd, buf, length + 1)
             title = buf.value
 
         pid = ctypes.c_ulong(0)
-        ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
         exe_name = ""
         if pid.value:
             hproc = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid.value)
@@ -305,6 +303,17 @@ def get_foreground_window_info():
                                 exe_name = real_exe
                 finally:
                     ctypes.windll.kernel32.CloseHandle(hproc)
+        return exe_name, title
+    except Exception:
+        return "", ""
+
+def get_foreground_window_info() -> Tuple[str, str]:
+    """Returns (exe_basename_lower, window_title) of the currently focused Windows application."""
+    global last_foreground_hwnd
+    try:
+        ensure_default_desktop()
+        hwnd = ctypes.windll.user32.GetForegroundWindow()
+        exe_name, title = get_window_info(hwnd)
         if hwnd and exe_name and exe_name not in ("python.exe", "pythonw.exe"):
             last_foreground_hwnd = hwnd
         return exe_name, title
@@ -350,33 +359,10 @@ def force_foreground_window(hwnd: int) -> bool:
         if attached_target:
             user32.AttachThreadInput(curr_tid, target_tid, False)
 
-def get_active_cad_hwnd(hint_hwnd: Optional[int] = None) -> Optional[int]:
-    """Resolves the true top-level HWND of Autodesk Fusion or the active CAD app."""
+def find_cad_hwnd() -> Optional[int]:
+    """Finds a running CAD window (Autodesk Fusion 360, AutoCAD, etc.) on the desktop."""
     user32 = ctypes.windll.user32
     ensure_default_desktop()
-    
-    # 1. Hint if valid CAD window
-    if hint_hwnd and user32.IsWindow(hint_hwnd):
-        length = user32.GetWindowTextLengthW(hint_hwnd)
-        if length > 0:
-            buff = ctypes.create_unicode_buffer(length + 1)
-            user32.GetWindowTextW(hint_hwnd, buff, length + 1)
-            txt = buff.value.lower()
-            if any(k in txt for k in ("fusion", "autocad", "inventor", "solidworks")):
-                return hint_hwnd
-
-    # 2. Last known foreground HWND
-    global last_foreground_hwnd
-    if last_foreground_hwnd and user32.IsWindow(last_foreground_hwnd):
-        length = user32.GetWindowTextLengthW(last_foreground_hwnd)
-        if length > 0:
-            buff = ctypes.create_unicode_buffer(length + 1)
-            user32.GetWindowTextW(last_foreground_hwnd, buff, length + 1)
-            txt = buff.value.lower()
-            if any(k in txt for k in ("fusion", "autocad", "inventor", "solidworks")):
-                return last_foreground_hwnd
-
-    # 3. Visible window enumeration fallback
     found_hwnd = None
     WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
     def cb(h, lp):
@@ -387,7 +373,7 @@ def get_active_cad_hwnd(hint_hwnd: Optional[int] = None) -> Optional[int]:
                 b = ctypes.create_unicode_buffer(l + 1)
                 user32.GetWindowTextW(h, b, l + 1)
                 t = b.value.lower()
-                if "autodesk fusion" in t or "autocad" in t:
+                if any(k in t for k in ("autodesk fusion", "autocad", "inventor", "solidworks")):
                     found_hwnd = h
                     return False
         return True
@@ -395,12 +381,23 @@ def get_active_cad_hwnd(hint_hwnd: Optional[int] = None) -> Optional[int]:
         user32.EnumWindows(WNDENUMPROC(cb), 0)
     except Exception:
         pass
-    return found_hwnd or hint_hwnd
+    return found_hwnd
+
+def get_active_cad_hwnd(hint_hwnd: Optional[int] = None) -> Optional[int]:
+    """Resolves CAD window ONLY if hint_hwnd or last_foreground_hwnd is already a CAD window.
+    Never searches the desktop to hijack non-CAD windows."""
+    user32 = ctypes.windll.user32
+    ensure_default_desktop()
+    for h in (hint_hwnd, last_foreground_hwnd):
+        if h and user32.IsWindow(h):
+            exe, title = get_window_info(h)
+            txt = (exe + " " + title).lower()
+            if any(k in txt for k in ("fusion", "autocad", "inventor", "solidworks")):
+                return h
+    return None
 
 def get_foreground_window_title() -> str:
     """Returns the lowercase title of the currently focused Windows application."""
-    _, title = get_foreground_window_info()
-    return title.lower()
     _, title = get_foreground_window_info()
     return title.lower()
 
@@ -1159,42 +1156,78 @@ def on_radial_slice_selected(act_type: str, act_val: str, act_label: str, fb_typ
     """Callback invoked when a user selects a slice from the on-screen Radial Menu."""
     logger.info(f">>> [Radial Menu Selected] {act_label} -> {act_type.upper()}: {act_val} (fb={fb_type}:{fb_val})")
     
-    # 0. Find and force focus to the true CAD window without altering maximized state
-    cad_hwnd = get_active_cad_hwnd(target_hwnd)
-    if cad_hwnd:
-        force_foreground_window(cad_hwnd)
-    time.sleep(0.12)  # 120ms for Windows / Qt to route keyboard focus
+    # 0. Always restore keyboard focus directly to the window that summoned the radial menu
+    if target_hwnd and ctypes.windll.user32.IsWindow(target_hwnd):
+        force_foreground_window(target_hwnd)
+    time.sleep(0.08)  # 80ms for Windows / Qt to route keyboard focus
 
+    # 1. Determine target window app context
+    target_exe, target_title = get_window_info(target_hwnd) if target_hwnd else get_foreground_window_info()
+    target_exe_l = target_exe.lower()
+    target_title_l = target_title.lower()
+    is_fusion = ("fusion" in target_exe_l) or ("fusion" in target_title_l) or (act_type in ("fusion", "fusion_view"))
+
+    # If action is explicitly a Fusion CAD command but target window is not Fusion, locate and switch to Fusion
+    if (act_type in ("fusion", "fusion_view")) and not ("fusion" in target_exe_l or "fusion" in target_title_l):
+        cad_h = find_cad_hwnd()
+        if cad_h:
+            force_foreground_window(cad_h)
+            time.sleep(0.08)
+            is_fusion = True
+
+    # 2. General / Non-CAD App Handling (Opera, Chrome, Windows Explorer, VSCode, Terminal, etc.)
+    if not is_fusion:
+        val_raw = act_val.strip()
+        if act_type == "action_str" or ":" in val_raw:
+            execute_action_string(val_raw, act_label)
+            return
+        if act_type in ("hotkey", "key", "vkey") or val_raw.upper() in VK_MAP:
+            if val_raw.upper() in VK_MAP:
+                send_vk_tap(VK_MAP[val_raw.upper()], 0.03)
+            else:
+                send_hotkey_combo(val_raw)
+            return
+        if fb_type == "fkey" and fb_val:
+            send_vk_tap(ord(fb_val.upper()), 0.04)
+            return
+        if val_raw:
+            if ":" in val_raw:
+                execute_action_string(val_raw, act_label)
+            else:
+                send_hotkey_combo(val_raw)
+        return
+
+    # 3. Autodesk Fusion 360 & CAD Handling
     val_l = act_val.lower().strip()
     if val_l.startswith("hotkey:"):
         val_l = val_l.split(":", 1)[1].strip()
 
-    # 1. Try native Fusion 360 Add-In Bridge first (<2ms direct API execution)
+    # 3a. Try native Fusion 360 Add-In Bridge first (<2ms direct API execution)
     if act_type == "fusion" or val_l in FUSION_DIRECT_HOTKEYS or val_l in FUSION_ADDIN_MAP:
         addin_target = FUSION_ADDIN_MAP.get(val_l.upper(), ("command", val_l))
         if send_fusion_addin_command(addin_target[1], action=addin_target[0], cancel_first=True):
             logger.info(f"    [MacroPadFusionBridge] Executed '{addin_target[1]}' natively via Fusion API")
             return
 
-    # 2. Check if action has a direct native Fusion hotkey (Line, Circle, Extrude, etc.)
+    # 3b. Check if action has a direct native Fusion hotkey (Line, Circle, Extrude, etc.)
     if val_l in FUSION_DIRECT_HOTKEYS:
         hk = FUSION_DIRECT_HOTKEYS[val_l]
         send_vk_tap(ord(hk.upper()), 0.04)
         logger.info(f"    [Radial Hotkey] Tapped '{hk}' for {act_val}")
         return
 
-    # 3. Check if slice definition specified a direct fkey (e.g. fb_type='fkey', fb_val='C')
+    # 3c. Check if slice definition specified a direct fkey (e.g. fb_type='fkey', fb_val='C')
     if fb_type == "fkey" and fb_val:
         send_vk_tap(ord(fb_val.upper()), 0.04)
         logger.info(f"    [Radial fkey] Tapped '{fb_val}' for {act_val}")
         return
 
-    # 4. Action strings (e.g. 'action_str', 'fusion:line', 'hotkey:E')
+    # 3d. Action strings (e.g. 'action_str', 'fusion:line', 'hotkey:E')
     if act_type == "action_str" or ":" in act_val:
         execute_action_string(act_val, act_label)
         return
 
-    # 4. Viewport orientation commands
+    # 3e. Viewport orientation commands
     if act_type == "fusion_view":
         if act_val in ("home", "fit"):
             send_vk_tap(VK_MAP["F6"], 0.025)
@@ -1205,7 +1238,7 @@ def on_radial_slice_selected(act_type: str, act_val: str, act_label: str, fb_typ
         send_vk_tap(VK_MAP["F6"], 0.025)
         return
 
-    # 5. AutoCAD / generic CAD commands
+    # 3f. AutoCAD / generic CAD commands
     if act_type == "cmd":
         send_cad_command(act_val, cancel_first=True)
         return
@@ -1215,7 +1248,7 @@ def on_radial_slice_selected(act_type: str, act_val: str, act_label: str, fb_typ
             send_vk_tap(vk, 0.025)
         return
 
-    # 6. Tools without a single-letter shortcut (e.g. '3 Point Arc', 'Create Sketch', 'Center Rectangle')
+    # 3g. Tools without a single-letter shortcut (e.g. '3 Point Arc', 'Create Sketch', 'Center Rectangle')
     # Use Fusion 360's native 'S' search popup
     search_query = fb_val or act_label or act_val.replace("_", " ")
     # Clean up shortcut hints from search query (e.g. "3-Point Arc", "Create Sketch")
